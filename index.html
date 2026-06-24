@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- saved from url=(0051)file:///C:/Users/NikoKorpela/Downloads/index_3.html -->
+<!-- saved from url=(0051)file:///C:/Users/NikoKorpela/Downloads/index_5.html -->
 <html lang="fi"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
@@ -69,7 +69,7 @@ textarea{resize:none;min-height:56px;line-height:1.5}
 /* MAP */
 .map-container{position:relative;border:1px solid var(--border);border-radius:var(--rs);overflow:hidden;background:#e8edf5;height:240px;touch-action:none;}
 .map-img-wrap{position:absolute;top:0;left:0;transform-origin:0 0;}
-.map-img-wrap img{display:block;width:700px;height:688px;}
+.map-img-wrap img{display:block;width:840px;height:825px;}
 .map-dot{position:absolute;width:16px;height:16px;background:var(--red);border:2.5px solid white;border-radius:50%;box-shadow:0 1px 5px rgba(0,0,0,0.4);transform:translate(-50%,-50%);pointer-events:none;z-index:5;display:none}
 .map-ui{position:absolute;bottom:8px;right:8px;display:flex;flex-direction:column;gap:4px;z-index:10}
 .map-zbtn{width:32px;height:32px;background:rgba(255,255,255,0.92);border:1px solid #ccc;border-radius:7px;font-size:20px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#333;line-height:1}
@@ -178,7 +178,7 @@ textarea{resize:none;min-height:56px;line-height:1.5}
 const SUPABASE_URL = 'https://ddgsbamrafhasrtsrsyv.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRkZ3NiYW1yYWZoYXNydHNyc3l2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyODU2MzUsImV4cCI6MjA5Nzg2MTYzNX0.gsbIu5yAUA_iINCGF20p4bSAWJCaEN6UXi8_OlGC3Oc';
 const MAP_URI = 'https://ddgsbamrafhasrtsrsyv.supabase.co/storage/v1/object/public/maps/map_hires.jpg';
-const MAP_W = 4210, MAP_H = 4136;
+const MAP_W = 840, MAP_H = 825;
 
 const CATS = [
   'Paneeli rikki','Paneeli väärinpäin – ylä','Paneeli väärinpäin – ala',
@@ -230,7 +230,7 @@ function updateGPSDot(id) {
 // MAP STATE
 const mapStates = {};
 function getMapState(id) {
-  if (!mapStates[id]) mapStates[id] = {scale:0.25, tx:0, ty:0};
+  if (!mapStates[id]) mapStates[id] = {scale:0.29, tx:0, ty:0};
   return mapStates[id];
 }
 
