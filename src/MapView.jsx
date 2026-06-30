@@ -119,6 +119,58 @@ export default function MapView({ mapData, pin, onPin, gpsCoords }) {
     onPin({ x: Math.max(0, Math.min(1, mapX)), y: Math.max(0, Math.min(1, mapY)) })
   }, [W, H, onPin])
 
+  // --- Desktop mouse drag-to-pan ---
+  const mouseRef = useRef(null)
+
+  const onMouseDown = useCallback((e) => {
+    if (e.target.tagName === 'BUTTON') return
+    const s = stateRef.current
+    mouseRef.current = { startX: e.clientX, startY: e.clientY, tx: s.tx, ty: s.ty, moved: false }
+  }, [])
+
+  const onMouseMove = useCallback((e) => {
+    const m = mouseRef.current
+    if (!m) return
+    const dx = e.clientX - m.startX
+    const dy = e.clientY - m.startY
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) m.moved = true
+    if (m.moved) {
+      const s = stateRef.current
+      applyTransform(clamp({ scale: s.scale, tx: m.tx + dx, ty: m.ty + dy }))
+    }
+  }, [applyTransform, clamp])
+
+  const onMouseUp = useCallback((e) => {
+    const m = mouseRef.current
+    if (m && !m.moved) {
+      // Treat as a click — place pin
+      onClick(e)
+    }
+    mouseRef.current = null
+  }, [onClick])
+
+  const onMouseLeave = useCallback(() => {
+    mouseRef.current = null
+  }, [])
+
+  // --- Desktop scroll wheel zoom ---
+  const onWheel = useCallback((e) => {
+    e.preventDefault()
+    const el = containerRef.current
+    if (!el) return
+    const s = stateRef.current
+    const rect = el.getBoundingClientRect()
+    const cx = e.clientX - rect.left
+    const cy = e.clientY - rect.top
+    const factor = e.deltaY < 0 ? 1.15 : 0.87
+    const newScale = Math.min(8, Math.max(0.1, s.scale * factor))
+    applyTransform(clamp({
+      scale: newScale,
+      tx: cx - (cx - s.tx) * (newScale / s.scale),
+      ty: cy - (cy - s.ty) * (newScale / s.scale)
+    }))
+  }, [applyTransform, clamp])
+
   const zoom = useCallback((factor) => {
     const el = containerRef.current
     if (!el) return
@@ -151,11 +203,15 @@ export default function MapView({ mapData, pin, onPin, gpsCoords }) {
     <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', background: '#eef4ec' }}>
       <div
         ref={containerRef}
-        style={{ height: 240, position: 'relative', overflow: 'hidden', touchAction: 'none', userSelect: 'none' }}
+        style={{ height: 240, position: 'relative', overflow: 'hidden', touchAction: 'none', userSelect: 'none', cursor: 'grab' }}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
-        onClick={onClick}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onMouseLeave}
+        onWheel={onWheel}
       >
         {/* SVG Map */}
         <svg
