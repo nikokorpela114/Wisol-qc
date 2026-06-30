@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import MapView from './MapView.jsx'
 import { parseDXF } from './dxfParser.js'
+import { latLngToTM35FIN } from './coords.js'
 
 const SUPABASE_URL = 'https://ddgsbamrafhasrtsrsyv.supabase.co'
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRkZ3NiYW1yYWZoYXNydHNyc3l2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyODU2MzUsImV4cCI6MjA5Nzg2MTYzNX0.gsbIu5yAUA_iINCGF20p4bSAWJCaEN6UXi8_OlGC3Oc'
@@ -16,12 +17,19 @@ const CATS = [
 
 let idCounter = 0
 
+const KNOWN_SITES = [
+  { key: 'isoneva', label: 'Isoneva, Suonenjoki' },
+  { key: 'lamminneva', label: 'Lamminneva, Lappajärvi' },
+]
+
 export default function App() {
-  const [site, setSite] = useState('')
+  const [site, setSite] = useState('Isoneva, Suonenjoki')
   const [inspector, setInspector] = useState('')
   const [rivi, setRivi] = useState('')
   const [obs, setObs] = useState([])
   const [mapData, setMapData] = useState(null)
+  const [mapError, setMapError] = useState('')
+  const [currentSiteKey, setCurrentSiteKey] = useState('isoneva')
   const [gpsCoords, setGpsCoords] = useState(null)
   const [syncMsg, setSyncMsg] = useState('')
   const [pdfMode, setPdfMode] = useState(false)
@@ -30,33 +38,38 @@ export default function App() {
   const fileInputRef = useRef(null)
   const syncTimer = useRef(null)
 
-  // GPS
+  // GPS — convert ETRS-TM35FIN (EPSG:3067) coords from the DXF to lat/lng on the fly
   useEffect(() => {
-    if (!navigator.geolocation) return
-    const LAT_N = 62.945, LAT_S = 62.905, LNG_W = 27.11, LNG_E = 27.22
+    if (!navigator.geolocation || !mapData) return
     const watcher = navigator.geolocation.watchPosition(pos => {
-      const x = (pos.coords.longitude - LNG_W) / (LNG_E - LNG_W)
-      const y = (LAT_N - pos.coords.latitude) / (LAT_N - LAT_S)
-      setGpsCoords({ x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) })
+      const { x, y } = latLngToTM35FIN(pos.coords.latitude, pos.coords.longitude)
+      const mapX = (x - mapData.minX) / (mapData.maxX - mapData.minX)
+      const mapY = 1 - (y - mapData.minY) / (mapData.maxY - mapData.minY)
+      setGpsCoords({ x: Math.max(-0.2, Math.min(1.2, mapX)), y: Math.max(-0.2, Math.min(1.2, mapY)) })
     }, null, { enableHighAccuracy: true, maximumAge: 5000 })
     return () => navigator.geolocation.clearWatch(watcher)
-  }, [])
+  }, [mapData])
 
-  // Load DXF from Supabase storage
+  // Load DXF from Supabase storage based on selected site
   useEffect(() => {
-    loadDXF()
-  }, [])
+    loadDXF(currentSiteKey)
+  }, [currentSiteKey])
 
-  async function loadDXF() {
+  async function loadDXF(siteKey) {
+    setMapData(null)
+    setMapError('')
     try {
-      const { data } = await sb.storage.from('maps').download('isoneva.dxf')
-      if (data) {
-        const text = await data.text()
-        const parsed = parseDXF(text)
-        if (parsed) setMapData(parsed)
+      const { data, error } = await sb.storage.from('maps').download(`${siteKey}.dxf`)
+      if (error || !data) {
+        setMapError('Ei karttaa tälle työmaalle')
+        return
       }
+      const text = await data.text()
+      const parsed = parseDXF(text)
+      if (parsed) setMapData(parsed)
+      else setMapError('DXF-tiedostoa ei voitu lukea')
     } catch (e) {
-      console.log('No DXF in storage, waiting for upload')
+      setMapError('Ei karttaa tälle työmaalle')
     }
   }
 
@@ -148,10 +161,10 @@ export default function App() {
     const parsed = parseDXF(text)
     if (parsed) {
       setMapData(parsed)
+      setMapError('')
       showSync('✓ Kartta ladattu!')
-      // Save to Supabase storage
       try {
-        await sb.storage.from('maps').upload('isoneva.dxf', file, { upsert: true })
+        await sb.storage.from('maps').upload(`${currentSiteKey}.dxf`, file, { upsert: true })
       } catch {}
     } else {
       showSync('⚠ DXF-tiedostoa ei voitu lukea')
@@ -272,7 +285,18 @@ export default function App() {
 
         {/* Meta */}
         <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8, background: '#fff', borderBottom: '1px solid #d0d5e8' }}>
-          <input style={inputStyle} placeholder="Työmaa (esim. Isoneva)" value={site} onChange={e => setSite(e.target.value)} />
+          <select
+            style={selectStyle}
+            value={currentSiteKey}
+            onChange={e => {
+              const key = e.target.value
+              setCurrentSiteKey(key)
+              const found = KNOWN_SITES.find(s => s.key === key)
+              setSite(found ? found.label : '')
+            }}
+          >
+            {KNOWN_SITES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
           <input style={inputStyle} placeholder="Tarkastaja" value={inspector} onChange={e => setInspector(e.target.value)} />
           <input style={inputStyle} placeholder="Rivi / alue (esim. A7-45)" value={rivi} onChange={e => setRivi(e.target.value)} />
         </div>
@@ -280,9 +304,11 @@ export default function App() {
         {/* DXF upload if no map */}
         {!mapData && (
           <div style={{ margin: '12px 16px', padding: 16, background: '#fff', borderRadius: 12, border: '1.5px dashed #b0b8d8', textAlign: 'center' }}>
-            <p style={{ fontSize: 13, color: '#6670a0', marginBottom: 10 }}>Lataa DXF/DWG työmaakartta</p>
+            <p style={{ fontSize: 13, color: '#6670a0', marginBottom: 10 }}>
+              {mapError || 'Ladataan karttaa...'}
+            </p>
             <button onClick={() => fileInputRef.current.click()} style={{ background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontSize: 13, fontWeight: 700 }}>
-              📂 Valitse tiedosto
+              📂 Lataa DXF tälle työmaalle
             </button>
             <input ref={fileInputRef} type="file" accept=".dxf,.dwg" style={{ display: 'none' }} onChange={handleDXFUpload} />
           </div>

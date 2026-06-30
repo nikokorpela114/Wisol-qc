@@ -206,12 +206,16 @@ export default function MapView({ mapData, pin, onPin, gpsCoords }) {
             />
           ))}
 
-          {/* Panel tables */}
+          {/* Panel tables - drawn as rotated rectangles using actual DXF rotation */}
           {inserts.map((ins, i) => {
             const scaleXm = W / (maxX - minX)
             const scaleYm = H / (maxY - minY)
             const tw = PANEL_W_M * scaleXm
             const th = ins.panels * PANEL_H_M * scaleYm
+            // DXF rotation is counter-clockwise in real-world coords.
+            // Our ty() flips Y, which also flips the visual rotation direction,
+            // so the on-screen rotation angle is simply +rot (not -rot).
+            const angle = ins.rot
             return (
               <rect
                 key={`ins${i}`}
@@ -223,7 +227,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords }) {
                 fillOpacity={0.18}
                 stroke="#1a2fcc"
                 strokeWidth={strokeW * 0.5}
-                transform={`rotate(${-ins.rot} ${ins.x} ${ins.y})`}
+                transform={`rotate(${angle} ${ins.x} ${ins.y})`}
               />
             )
           })}
