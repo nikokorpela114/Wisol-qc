@@ -262,20 +262,18 @@ export default function MapView({ mapData, pin, onPin, gpsCoords }) {
             />
           ))}
 
-          {/* Panel tables - drawn as rotated rectangles using actual DXF rotation */}
+          {/* Panel tables - axis-aligned: wide along X (panel row direction),
+              narrow along Y (table depth). Confirmed from DXF: tables in the
+              same row share Y and are spaced widely apart in X. */}
           {inserts.map((ins, i) => {
             const scaleXm = W / (maxX - minX)
             const scaleYm = H / (maxY - minY)
-            const tw = PANEL_W_M * scaleXm
-            const th = ins.panels * PANEL_H_M * scaleYm
-            // DXF rotation is counter-clockwise in real-world coords.
-            // Our ty() flips Y, which also flips the visual rotation direction,
-            // so the on-screen rotation angle is simply +rot (not -rot).
-            const angle = ins.rot
+            const tw = ins.panels * PANEL_W_M * scaleXm / 22
+            const th = PANEL_H_M * 6 * scaleYm
             return (
               <rect
                 key={`ins${i}`}
-                x={ins.x}
+                x={ins.x - tw}
                 y={ins.y - th}
                 width={tw}
                 height={th}
@@ -283,7 +281,6 @@ export default function MapView({ mapData, pin, onPin, gpsCoords }) {
                 fillOpacity={0.18}
                 stroke="#1a2fcc"
                 strokeWidth={strokeW * 0.5}
-                transform={`rotate(${angle} ${ins.x} ${ins.y})`}
               />
             )
           })}

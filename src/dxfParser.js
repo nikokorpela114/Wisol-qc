@@ -86,11 +86,9 @@ export function parseDXF(text) {
           if (px >= minX && px <= maxX && py >= minY && py <= maxY) {
             const m = block.match(/2P(\d+)/)
             const panels = m ? parseInt(m[1]) : 22
-            // Rotation is encoded in the block name like "2P44@30DEG ..."
-            // rather than the DXF rotation group code (50), which is absent here.
-            const degMatch = block.match(/@(-?\d+(?:\.\d+)?)DEG/i)
-            const blockRot = degMatch ? parseFloat(degMatch[1]) : 0
-            inserts.push({ x: tx(px), y: ty(py), panels, rot: rot || blockRot, block })
+            // The "@30DEG" in the block name is the panel TILT angle (mounting angle),
+            // not a rotation in the XY plane — tables are laid out axis-aligned.
+            inserts.push({ x: tx(px), y: ty(py), panels, rot: rot || 0, block })
           }
         }
         i = j
