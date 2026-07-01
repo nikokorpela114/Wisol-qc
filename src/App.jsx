@@ -221,7 +221,7 @@ export default function App() {
         doc.text(lines, M + 2, y); y += lines.length * 5 + 3
       }
 
-      // Map thumbnail - full site map with the pin's row highlighted in red
+      // Map thumbnail - cropped to a local window around the pin's row, with that row highlighted in red
       if (o.pin && mapData) {
         if (y + 96 > 278) { doc.addPage(); y = 18 }
         doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
@@ -302,16 +302,42 @@ export default function App() {
           mctx.fillStyle = '#d63030'; mctx.fill()
           mctx.strokeStyle = 'white'; mctx.lineWidth = 3.5; mctx.stroke()
 
-          // Show the full map — same wide view the app shows by default —
-          // rather than cropping to whatever zoom level happened to be active
-          // when the pin was placed. The highlighted row + enlarged red number
-          // already make the exact location easy to find at this zoom level.
-          const maxW = 130, maxH = 90
-          const fitScale = Math.min(maxW / mapW, maxH / mapH)
-          const pdfW = mapW * fitScale, pdfH = mapH * fitScale
-          const mapImg = mapCanvas.toDataURL('image/jpeg', 0.92)
+          // Crop to a local context window around the pin — not the whole
+          // (potentially huge, multi-block) site, and not dependent on
+          // whatever zoom the phone happened to be at. Window size is derived
+          // from the actual row-to-row spacing on this map, so it always
+          // shows roughly the same number of neighbouring rows for context,
+          // however big or small the site is.
+          let rowPitch = mapData.H / 20
+          if (mapData.inserts.length > 1) {
+            const ys = mapData.inserts.map(ins => ins.y).sort((a, b) => a - b)
+            const gaps = []
+            for (let i = 1; i < ys.length; i++) {
+              const g = ys[i] - ys[i - 1]
+              if (g > 0.5) gaps.push(g)
+            }
+            if (gaps.length) {
+              gaps.sort((a, b) => a - b)
+              rowPitch = gaps[Math.floor(gaps.length / 2)]
+            }
+          }
+          const aspect = 130 / 90
+          let cropHs = Math.min(mapData.H, rowPitch * 11)
+          let cropWs = Math.min(mapData.W, cropHs * aspect)
+          let cx0 = Math.max(0, Math.min(mapData.W - cropWs, pinSvgX - cropWs / 2))
+          let cy0 = Math.max(0, Math.min(mapData.H - cropHs, pinSvgY - cropHs / 2))
+
+          const cx1 = cx0 * scx, cy1 = cy0 * scy
+          const cropWpx = cropWs * scx, cropHpx = cropHs * scy
+          const cropCanvas = document.createElement('canvas')
+          cropCanvas.width = Math.round(cropWpx); cropCanvas.height = Math.round(cropHpx)
+          cropCanvas.getContext('2d').drawImage(mapCanvas, cx1, cy1, cropWpx, cropHpx, 0, 0, cropWpx, cropHpx)
+          const cropImg = cropCanvas.toDataURL('image/jpeg', 0.92)
+
+          let pdfW = 130, pdfH = pdfW * (cropHpx / cropWpx)
+          if (pdfH > 90) { pdfH = 90; pdfW = pdfH * (cropWpx / cropHpx) }
           if (y + pdfH > 278) { doc.addPage(); y = 18 }
-          doc.addImage(mapImg, 'JPEG', M, y, pdfW, pdfH)
+          doc.addImage(cropImg, 'JPEG', M, y, pdfW, pdfH)
           y += pdfH + 4
         } catch(e) { console.error('Map PDF:', e) }
       }
