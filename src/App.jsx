@@ -221,7 +221,7 @@ export default function App() {
         doc.text(lines, M + 2, y); y += lines.length * 5 + 3
       }
 
-      // Map thumbnail - shows exactly the pan/zoom view left on screen for this observation, pin's row highlighted in red
+      // Map thumbnail - uses the zoom level left on screen, centered on the pin, pin's row highlighted in red
       if (o.pin && mapData) {
         if (y + 96 > 278) { doc.addPage(); y = 18 }
         doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
@@ -302,16 +302,20 @@ export default function App() {
           mctx.fillStyle = '#d63030'; mctx.fill()
           mctx.strokeStyle = 'white'; mctx.lineWidth = 3.5; mctx.stroke()
 
-          // Crop to exactly the pan/zoom view that was left on screen for
-          // this observation (o.mapView, captured live from MapView.jsx).
-          // containerW/containerH come from the actual on-screen map element
-          // size at that moment, since that varies by device width.
-          const view = o.mapView || { scale: 1, tx: 0, ty: 0, containerW: 360, containerH: 240 }
+          // Use the zoom level (scale) left on screen for this observation,
+          // but always center the crop on the pin itself rather than trusting
+          // the saved pan position — otherwise if the map got panned around
+          // after the pin was placed, the crop can drift to an unrelated part
+          // of the site.
+          const view = o.mapView || { scale: 1, containerW: 360, containerH: 240 }
+          const scale = view.scale || 1
           const containerW = view.containerW || 360, containerH = view.containerH || 240
-          const visX1 = Math.max(0, (-view.tx) / view.scale)
-          const visY1 = Math.max(0, (-view.ty) / view.scale)
-          const visX2 = Math.min(mapData.W, (containerW - view.tx) / view.scale)
-          const visY2 = Math.min(mapData.H, (containerH - view.ty) / view.scale)
+          const tx = containerW / 2 - pinSvgX * scale
+          const ty = containerH / 2 - pinSvgY * scale
+          const visX1 = Math.max(0, (-tx) / scale)
+          const visY1 = Math.max(0, (-ty) / scale)
+          const visX2 = Math.min(mapData.W, (containerW - tx) / scale)
+          const visY2 = Math.min(mapData.H, (containerH - ty) / scale)
           const cx1 = visX1 * scx, cy1 = visY1 * scy
           const cx2 = visX2 * scx, cy2 = visY2 * scy
           const cropWpx = Math.max(1, cx2 - cx1), cropHpx = Math.max(1, cy2 - cy1)
