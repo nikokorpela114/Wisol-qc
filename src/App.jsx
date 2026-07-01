@@ -130,6 +130,10 @@ export default function App() {
     }))
   }
 
+  function setMapView(id, view) {
+    setObs(prev => prev.map(o => o.id !== id ? o : { ...o, mapView: view }))
+  }
+
   function addPhotos(id, files) {
     Array.from(files).forEach(file => {
       const reader = new FileReader()
@@ -217,28 +221,26 @@ export default function App() {
         doc.text(lines, M + 2, y); y += lines.length * 5 + 3
       }
 
-      // Map thumbnail with pin
+      // Map thumbnail - shows exactly the zoomed view from the app
       if (o.pin && mapData) {
-        if (y + 65 > 278) { doc.addPage(); y = 18 }
+        if (y + 68 > 278) { doc.addPage(); y = 18 }
         doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
         doc.text('Sijainti kartalla:', M + 2, y); y += 4
         try {
-          // Draw map as SVG rendered to canvas
+          // Render full map to canvas at high res
+          const mapW = 1800, mapH = Math.round(mapData.H / mapData.W * 1800)
           const mapCanvas = document.createElement('canvas')
-          const mapW = 800, mapH = Math.round(mapData.H / mapData.W * 800)
           mapCanvas.width = mapW; mapCanvas.height = mapH
           const mctx = mapCanvas.getContext('2d')
-          // White background
           mctx.fillStyle = '#eef4ec'; mctx.fillRect(0, 0, mapW, mapH)
           const scx = mapW / mapData.W, scy = mapH / mapData.H
-          // Draw PV areas
-          mctx.fillStyle = 'rgba(200,223,245,0.8)'; mctx.strokeStyle = '#4a90d9'; mctx.lineWidth = 1
+
+          mctx.fillStyle = 'rgba(200,223,245,0.85)'; mctx.strokeStyle = '#4a90d9'; mctx.lineWidth = 1.5
           mapData.pvAreas.forEach(pts => {
             mctx.beginPath(); pts.forEach(([x,y2],i) => i===0 ? mctx.moveTo(x*scx,y2*scy) : mctx.lineTo(x*scx,y2*scy))
             mctx.closePath(); mctx.fill(); mctx.stroke()
           })
-          // Draw tables
-          mctx.fillStyle = 'rgba(26,47,204,0.25)'; mctx.strokeStyle = '#1a2fcc'; mctx.lineWidth = 0.5
+          mctx.fillStyle = 'rgba(26,47,204,0.22)'; mctx.strokeStyle = '#1a2fcc'; mctx.lineWidth = 0.8
           const PANEL_W = 1.15, TABLE_D = 4.29
           const sxm = mapData.W / (mapData.maxX - mapData.minX)
           const sym = mapData.H / (mapData.maxY - mapData.minY)
@@ -248,16 +250,46 @@ export default function App() {
             mctx.fillRect(ins.x*scx, ins.y*scy, tw, th)
             mctx.strokeRect(ins.x*scx, ins.y*scy, tw, th)
           })
+          mctx.font = 'bold 18px sans-serif'; mctx.textAlign = 'center'
+          mapData.rowNumbers.forEach(t => {
+            mctx.fillStyle = 'rgba(255,255,255,0.75)'
+            mctx.fillRect(t.x*scx-14, t.y*scy-14, 28, 16)
+            mctx.fillStyle = '#0d1a6e'
+            mctx.fillText(t.text, t.x*scx, t.y*scy)
+          })
           // Draw pin
           const pinX = o.pin.x * mapW, pinY = o.pin.y * mapH
-          mctx.beginPath(); mctx.arc(pinX, pinY, 8, 0, Math.PI*2)
+          mctx.beginPath(); mctx.arc(pinX, pinY, 14, 0, Math.PI*2)
           mctx.fillStyle = '#d63030'; mctx.fill()
-          mctx.strokeStyle = 'white'; mctx.lineWidth = 2; mctx.stroke()
-          const mapImg = mapCanvas.toDataURL('image/jpeg', 0.85)
-          const thumbW = 90, thumbH = thumbW * mapH / mapW
-          doc.addImage(mapImg, 'JPEG', M, y, thumbW, thumbH)
-          y += thumbH + 4
-        } catch(e) { console.error('Map PDF error:', e) }
+          mctx.strokeStyle = 'white'; mctx.lineWidth = 3.5; mctx.stroke()
+
+          // Determine crop area from saved mapView (zoom/pan state)
+          // mapView.tx, ty, scale describe how the map was displayed in the 240px container
+          // Container was 240px tall, width ~360px
+          const containerW = 360, containerH = 240
+          const view = o.mapView || { scale: 1, tx: 0, ty: 0 }
+          // What portion of the SVG (W×H) was visible in the container?
+          // visible SVG region: x = (-view.tx)/view.scale to (containerW - view.tx)/view.scale
+          const visX1 = Math.max(0, (-view.tx) / view.scale)
+          const visY1 = Math.max(0, (-view.ty) / view.scale)
+          const visX2 = Math.min(mapData.W, (containerW - view.tx) / view.scale)
+          const visY2 = Math.min(mapData.H, (containerH - view.ty) / view.scale)
+          // Convert to canvas pixels
+          const cx1 = visX1 * scx, cy1 = visY1 * scy
+          const cx2 = visX2 * scx, cy2 = visY2 * scy
+          const cropW = Math.max(1, cx2 - cx1), cropH = Math.max(1, cy2 - cy1)
+
+          const cropCanvas = document.createElement('canvas')
+          cropCanvas.width = Math.round(cropW); cropCanvas.height = Math.round(cropH)
+          cropCanvas.getContext('2d').drawImage(mapCanvas, cx1, cy1, cropW, cropH, 0, 0, cropW, cropH)
+
+          // Fit crop into 90mm wide space keeping aspect ratio, max 70mm tall
+          const pdfW = 90, pdfH = Math.min(70, pdfW * cropH / cropW)
+          const cropImg = cropCanvas.toDataURL('image/jpeg', 0.92)
+          if (y + pdfH > 278) { doc.addPage(); y = 18 }
+          doc.addImage(cropImg, 'JPEG', M, y, pdfW, pdfH)
+          y += pdfH + 4
+        } catch(e) { console.error('Map PDF:', e) }
       }
 
       for (const photo of o.photos) {
@@ -433,6 +465,7 @@ export default function App() {
                       pin={o.pin}
                       onPin={pin => setPin(o.id, pin)}
                       gpsCoords={gpsCoords}
+                      onViewChange={view => setMapView(o.id, view)}
                     />
                   </div>
                 )}
