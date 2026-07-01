@@ -217,6 +217,49 @@ export default function App() {
         doc.text(lines, M + 2, y); y += lines.length * 5 + 3
       }
 
+      // Map thumbnail with pin
+      if (o.pin && mapData) {
+        if (y + 65 > 278) { doc.addPage(); y = 18 }
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
+        doc.text('Sijainti kartalla:', M + 2, y); y += 4
+        try {
+          // Draw map as SVG rendered to canvas
+          const mapCanvas = document.createElement('canvas')
+          const mapW = 800, mapH = Math.round(mapData.H / mapData.W * 800)
+          mapCanvas.width = mapW; mapCanvas.height = mapH
+          const mctx = mapCanvas.getContext('2d')
+          // White background
+          mctx.fillStyle = '#eef4ec'; mctx.fillRect(0, 0, mapW, mapH)
+          const scx = mapW / mapData.W, scy = mapH / mapData.H
+          // Draw PV areas
+          mctx.fillStyle = 'rgba(200,223,245,0.8)'; mctx.strokeStyle = '#4a90d9'; mctx.lineWidth = 1
+          mapData.pvAreas.forEach(pts => {
+            mctx.beginPath(); pts.forEach(([x,y2],i) => i===0 ? mctx.moveTo(x*scx,y2*scy) : mctx.lineTo(x*scx,y2*scy))
+            mctx.closePath(); mctx.fill(); mctx.stroke()
+          })
+          // Draw tables
+          mctx.fillStyle = 'rgba(26,47,204,0.25)'; mctx.strokeStyle = '#1a2fcc'; mctx.lineWidth = 0.5
+          const PANEL_W = 1.15, TABLE_D = 4.29
+          const sxm = mapData.W / (mapData.maxX - mapData.minX)
+          const sym = mapData.H / (mapData.maxY - mapData.minY)
+          mapData.inserts.forEach(ins => {
+            const tw = ins.panels * PANEL_W * sxm * scx
+            const th = TABLE_D * sym * scy
+            mctx.fillRect(ins.x*scx, ins.y*scy, tw, th)
+            mctx.strokeRect(ins.x*scx, ins.y*scy, tw, th)
+          })
+          // Draw pin
+          const pinX = o.pin.x * mapW, pinY = o.pin.y * mapH
+          mctx.beginPath(); mctx.arc(pinX, pinY, 8, 0, Math.PI*2)
+          mctx.fillStyle = '#d63030'; mctx.fill()
+          mctx.strokeStyle = 'white'; mctx.lineWidth = 2; mctx.stroke()
+          const mapImg = mapCanvas.toDataURL('image/jpeg', 0.85)
+          const thumbW = 90, thumbH = thumbW * mapH / mapW
+          doc.addImage(mapImg, 'JPEG', M, y, thumbW, thumbH)
+          y += thumbH + 4
+        } catch(e) { console.error('Map PDF error:', e) }
+      }
+
       for (const photo of o.photos) {
         const img = new Image(); img.src = photo.src
         await new Promise(r => { img.onload = r; img.onerror = r })
