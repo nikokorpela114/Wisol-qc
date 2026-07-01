@@ -231,7 +231,15 @@ export default function App() {
     if (!window.confirm('Poistetaanko tämä havainto?')) return
     setObs(prev => {
       const o = prev.find(x => x.id === id)
-      if (o?.db_id) sb.from('observations').delete().eq('id', o.db_id)
+      if (o?.db_id) {
+        // anon-roolilla ei ole enää poisto-oikeutta tietoturvasyistä (ks.
+        // tighten_permissions.sql) — rivi jää siis pilveen arkistoksi vaikka
+        // se katoaa tästä listasta. Tämä on tarkoituksellista: yksittäinen
+        // asentaja ei voi enää pyyhkiä havaintoa pysyvästi pois tietokannasta.
+        sb.from('observations').delete().eq('id', o.db_id).then(({ error }) => {
+          if (error) console.log('Huom: havainto poistui vain paikallisesti, pilvikopio jäi talteen (tarkoituksellista).')
+        })
+      }
       return prev.filter(x => x.id !== id)
     })
   }
