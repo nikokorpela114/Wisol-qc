@@ -283,24 +283,24 @@ export default function App() {
           mapData.rowNumbers.forEach((t, idx) => {
             const isPinLabel = idx === pinLabelIdx
             if (isPinLabel) {
-              mctx.font = 'bold 17px sans-serif'
+              mctx.font = 'bold 13px sans-serif'
               mctx.fillStyle = '#d63030'
-              mctx.fillRect(t.x*scx-15, t.y*scy-13, 30, 18)
+              mctx.fillRect(t.x*scx-11, t.y*scy-10, 22, 14)
               mctx.fillStyle = '#ffffff'
-              mctx.fillText(t.text, t.x*scx, t.y*scy+3)
-            } else {
-              mctx.font = 'bold 11px sans-serif'
-              mctx.fillStyle = 'rgba(255,255,255,0.75)'
-              mctx.fillRect(t.x*scx-9, t.y*scy-8, 18, 11)
-              mctx.fillStyle = '#0d1a6e'
               mctx.fillText(t.text, t.x*scx, t.y*scy+2)
+            } else {
+              mctx.font = 'bold 9px sans-serif'
+              mctx.fillStyle = 'rgba(255,255,255,0.75)'
+              mctx.fillRect(t.x*scx-7, t.y*scy-6, 14, 9)
+              mctx.fillStyle = '#0d1a6e'
+              mctx.fillText(t.text, t.x*scx, t.y*scy+1)
             }
           })
           // Draw pin
           const pinX = o.pin.x * mapW, pinY = o.pin.y * mapH
-          mctx.beginPath(); mctx.arc(pinX, pinY, 14, 0, Math.PI*2)
+          mctx.beginPath(); mctx.arc(pinX, pinY, 8, 0, Math.PI*2)
           mctx.fillStyle = '#d63030'; mctx.fill()
-          mctx.strokeStyle = 'white'; mctx.lineWidth = 3.5; mctx.stroke()
+          mctx.strokeStyle = 'white'; mctx.lineWidth = 2.5; mctx.stroke()
 
           // Use the zoom level (scale) left on screen for this observation,
           // but always center the crop on the pin itself rather than trusting
