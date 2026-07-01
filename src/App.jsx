@@ -223,7 +223,7 @@ export default function App() {
 
       // Map thumbnail - uses the zoom level left on screen, centered on the pin, pin's row highlighted in red
       if (o.pin && mapData) {
-        if (y + 96 > 278) { doc.addPage(); y = 18 }
+        if (y + 150 > 278) { doc.addPage(); y = 18 }
         doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
         doc.text('Sijainti kartalla:', M + 2, y); y += 4
         try {
@@ -273,7 +273,7 @@ export default function App() {
           // zoom only used a small slice of pixels that then had to be
           // stretched up to fill the PDF. Fixed output resolution here means
           // the result stays sharp no matter how far the installer zoomed.
-          const outW = 900, outH = Math.round(outW * svgCropH / svgCropW)
+          const outW = 1200, outH = Math.round(outW * svgCropH / svgCropW)
           const mapCanvas = document.createElement('canvas')
           mapCanvas.width = outW; mapCanvas.height = outH
           const mctx = mapCanvas.getContext('2d')
@@ -323,8 +323,8 @@ export default function App() {
           mctx.strokeStyle = 'white'; mctx.lineWidth = 1.2; mctx.stroke()
 
           const mapImg = mapCanvas.toDataURL('image/jpeg', 0.95)
-          let pdfW = 130, pdfH = pdfW * (outH / outW)
-          if (pdfH > 90) { pdfH = 90; pdfW = pdfH * (outW / outH) }
+          let pdfW = CW, pdfH = pdfW * (outH / outW)
+          if (pdfH > 140) { pdfH = 140; pdfW = pdfH * (outW / outH) }
           if (y + pdfH > 278) { doc.addPage(); y = 18 }
           doc.addImage(mapImg, 'JPEG', M, y, pdfW, pdfH)
           y += pdfH + 4
