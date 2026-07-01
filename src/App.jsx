@@ -298,9 +298,9 @@ export default function App() {
           })
           // Draw pin
           const pinX = o.pin.x * mapW, pinY = o.pin.y * mapH
-          mctx.beginPath(); mctx.arc(pinX, pinY, 8, 0, Math.PI*2)
+          mctx.beginPath(); mctx.arc(pinX, pinY, 5, 0, Math.PI*2)
           mctx.fillStyle = '#d63030'; mctx.fill()
-          mctx.strokeStyle = 'white'; mctx.lineWidth = 2.5; mctx.stroke()
+          mctx.strokeStyle = 'white'; mctx.lineWidth = 1.5; mctx.stroke()
 
           // Use the zoom level (scale) left on screen for this observation,
           // but always center the crop on the pin itself rather than trusting
