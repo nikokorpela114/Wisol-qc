@@ -240,22 +240,61 @@ export default function App() {
             mctx.beginPath(); pts.forEach(([x,y2],i) => i===0 ? mctx.moveTo(x*scx,y2*scy) : mctx.lineTo(x*scx,y2*scy))
             mctx.closePath(); mctx.fill(); mctx.stroke()
           })
-          mctx.fillStyle = 'rgba(26,47,204,0.22)'; mctx.strokeStyle = '#1a2fcc'; mctx.lineWidth = 0.8
           const PANEL_W = 1.15, TABLE_D = 4.29
           const sxm = mapData.W / (mapData.maxX - mapData.minX)
           const sym = mapData.H / (mapData.maxY - mapData.minY)
-          mapData.inserts.forEach(ins => {
+
+          // Find which row (insert) the pin sits in, so we can highlight that
+          // exact row and its number — otherwise it's hard to tell which of
+          // several close-together row numbers actually belongs to the pin.
+          const pinSvgX = o.pin.x * mapData.W, pinSvgY = o.pin.y * mapData.H
+          let pinRowIdx = -1
+          mapData.inserts.forEach((ins, idx) => {
+            const tw = ins.panels * PANEL_W * sxm, th = TABLE_D * sym
+            if (pinSvgX >= ins.x - 3 && pinSvgX <= ins.x + tw + 3 && pinSvgY >= ins.y - 3 && pinSvgY <= ins.y + th + 3) {
+              pinRowIdx = idx
+            }
+          })
+
+          mapData.inserts.forEach((ins, idx) => {
             const tw = ins.panels * PANEL_W * sxm * scx
             const th = TABLE_D * sym * scy
+            const isPinRow = idx === pinRowIdx
+            mctx.fillStyle = isPinRow ? 'rgba(214,48,48,0.35)' : 'rgba(26,47,204,0.22)'
+            mctx.strokeStyle = isPinRow ? '#d63030' : '#1a2fcc'
+            mctx.lineWidth = isPinRow ? 2.5 : 0.8
             mctx.fillRect(ins.x*scx, ins.y*scy, tw, th)
             mctx.strokeRect(ins.x*scx, ins.y*scy, tw, th)
           })
-          mctx.font = 'bold 11px sans-serif'; mctx.textAlign = 'center'
-          mapData.rowNumbers.forEach(t => {
-            mctx.fillStyle = 'rgba(255,255,255,0.75)'
-            mctx.fillRect(t.x*scx-9, t.y*scy-8, 18, 11)
-            mctx.fillStyle = '#0d1a6e'
-            mctx.fillText(t.text, t.x*scx, t.y*scy+2)
+
+          // Find the label closest to the highlighted row's end point, to draw it emphasized
+          let pinLabelIdx = -1
+          if (pinRowIdx >= 0) {
+            const ins = mapData.inserts[pinRowIdx]
+            const targetX = ins.x + ins.panels * PANEL_W * sxm, targetY = ins.y + (TABLE_D * sym) / 2
+            let best = Infinity
+            mapData.rowNumbers.forEach((t, idx) => {
+              const d = Math.hypot(t.x - targetX, t.y - targetY)
+              if (d < best) { best = d; pinLabelIdx = idx }
+            })
+          }
+
+          mctx.textAlign = 'center'
+          mapData.rowNumbers.forEach((t, idx) => {
+            const isPinLabel = idx === pinLabelIdx
+            if (isPinLabel) {
+              mctx.font = 'bold 17px sans-serif'
+              mctx.fillStyle = '#d63030'
+              mctx.fillRect(t.x*scx-15, t.y*scy-13, 30, 18)
+              mctx.fillStyle = '#ffffff'
+              mctx.fillText(t.text, t.x*scx, t.y*scy+3)
+            } else {
+              mctx.font = 'bold 11px sans-serif'
+              mctx.fillStyle = 'rgba(255,255,255,0.75)'
+              mctx.fillRect(t.x*scx-9, t.y*scy-8, 18, 11)
+              mctx.fillStyle = '#0d1a6e'
+              mctx.fillText(t.text, t.x*scx, t.y*scy+2)
+            }
           })
           // Draw pin
           const pinX = o.pin.x * mapW, pinY = o.pin.y * mapH
