@@ -20,6 +20,37 @@ const DRAFT_KEY = 'wisol_qc_draft_v1'
 const PANEL_W_M = 1.15
 const TABLE_DEPTH_M = 4.29
 
+// English translations for the PDF only — the live app UI (used by Finnish
+// site supervisors) stays in Finnish. Stored values (o.cat, o.sev) remain
+// Finnish internally so existing data/Supabase rows stay consistent; only
+// the PDF rendering picks the right label at export time.
+const CAT_EN = {
+  'Paneeli rikki': 'Panel broken',
+  'Paneeli väärinpäin – ylä': 'Panel upside down – top',
+  'Paneeli väärinpäin – ala': 'Panel upside down – bottom',
+  'Paneelikiinnikkeissä rakoja': 'Gaps in panel clamps',
+  'Kiskon pultti löysä': 'Rail bolt loose',
+  'Kiskon pultti puuttuu': 'Rail bolt missing',
+  'Paneelikiinnikkeiden momentit vajaat': 'Panel clamp torque insufficient',
+  'Kiskot tasaamatta': 'Rails not aligned',
+  'Niittejä puuttuu': 'Rivets missing',
+  'Kannake vääntynyt / rikki': 'Bracket bent / broken',
+  'DC-kouru katkaisematta': 'DC conduit not cut open',
+  'Tupla poraruuvit puuttuvat': 'Double drill screws missing',
+  'Muu asia': 'Other',
+}
+const SEV_EN = { Kriittinen: 'Critical', Huomio: 'Attention', Info: 'Info' }
+const PDF_STR = {
+  fi: {
+    title: 'Laadunvalvontaraportti', site: 'Työmaa', inspector: 'Tarkastaja', rivi: 'Rivi / alue',
+    location: 'Sijainti kartalla:', row: 'rivi', other: 'Muu', footer: 'QC-raportti', dateLocale: 'fi-FI',
+  },
+  en: {
+    title: 'Quality Control Report', site: 'Site', inspector: 'Inspector', rivi: 'Row / area',
+    location: 'Location on map:', row: 'row', other: 'Other', footer: 'QC Report', dateLocale: 'en-GB',
+  },
+}
+
 // Given mapData and a normalized pin ({x,y} as 0..1 fractions of mapData.W/H),
 // find which row the pin lands in and the nearest row-number label. Used to
 // show a "detected row" hint in the UI so nobody has to eyeball/count rows.
@@ -338,24 +369,25 @@ export default function App() {
   }
 
   // PDF export
-  async function exportPDF() {
+  async function exportPDF(lang = 'fi') {
+    const T = PDF_STR[lang] || PDF_STR.fi
     const { jsPDF } = await import('jspdf')
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
     const W = 210, M = 14, CW = W - M * 2
     let y = 18
-    const dateStr = new Date().toLocaleDateString('fi-FI')
+    const dateStr = new Date().toLocaleDateString(T.dateLocale)
 
     doc.setFillColor(26, 47, 204)
     doc.rect(0, 0, W, 28, 'F')
     doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(245, 168, 0)
     doc.text('WISOL OY', M, 12)
     doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(255, 255, 255)
-    doc.text('Laadunvalvontaraportti', M, 19)
+    doc.text(T.title, M, 19)
     doc.setFontSize(9); doc.setTextColor(180, 200, 255)
     doc.text(dateStr, W - M, 12, { align: 'right' })
     y = 38
 
-    const meta = [['Työmaa', site || '–'], ['Tarkastaja', inspector || '–'], ['Rivi / alue', rivi || '–']]
+    const meta = [[T.site, site || '–'], [T.inspector, inspector || '–'], [T.rivi, rivi || '–']]
     meta.forEach(([k, v]) => {
       doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(100, 100, 120); doc.text(k, M, y)
       doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(20, 20, 60); doc.text(v, M + 28, y)
@@ -368,18 +400,20 @@ export default function App() {
     for (let i = 0; i < obs.length; i++) {
       const o = obs[i]
       if (i > 0) { doc.addPage(); y = 18 }
-      const lbl = o.cat === 'Muu asia' && o.muu ? `Muu – ${o.muu}` : o.cat
+      const catLabel = lang === 'en' ? (CAT_EN[o.cat] || o.cat) : o.cat
+      const sevLabel = lang === 'en' ? (SEV_EN[o.sev] || o.sev) : o.sev
+      const lbl = o.cat === 'Muu asia' && o.muu ? `${T.other} – ${o.muu}` : catLabel
       const col = sevCol[o.sev] || [80, 80, 80]
       doc.setFillColor(...col)
       doc.roundedRect(M, y, CW, 7, 1.5, 1.5, 'F')
       doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(255, 255, 255)
       doc.text(`${i + 1}.  ${lbl}`, M + 4, y + 5)
-      doc.text(o.sev, W - M - 4, y + 5, { align: 'right' })
+      doc.text(sevLabel, W - M - 4, y + 5, { align: 'right' })
       y += 10
 
       if (o.createdAt) {
         doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140)
-        doc.text(new Date(o.createdAt).toLocaleTimeString('fi-FI', { hour: '2-digit', minute: '2-digit' }), M + 2, y)
+        doc.text(new Date(o.createdAt).toLocaleTimeString(T.dateLocale, { hour: '2-digit', minute: '2-digit' }), M + 2, y)
         y += 4
       }
 
@@ -394,7 +428,7 @@ export default function App() {
         if (y + 150 > 278) { doc.addPage(); y = 18 }
         doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
         const detectedRow = findPinRow(mapData, o.pin)
-        doc.text(`Sijainti kartalla:${detectedRow ? '  (rivi ' + detectedRow.label + ')' : ''}`, M + 2, y); y += 4
+        doc.text(`${T.location}${detectedRow ? '  (' + T.row + ' ' + detectedRow.label + ')' : ''}`, M + 2, y); y += 4
         try {
           const PANEL_W = 1.15, TABLE_D = 4.29
           const sxm = mapData.W / (mapData.maxX - mapData.minX)
@@ -519,7 +553,7 @@ export default function App() {
     const tp = doc.getNumberOfPages()
     for (let p = 1; p <= tp; p++) {
       doc.setPage(p); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(160, 160, 160)
-      doc.text(`Wisol Oy · QC-raportti · ${dateStr}`, M, 292)
+      doc.text(`Wisol Oy · ${T.footer} · ${dateStr}`, M, 292)
       doc.text(`${p} / ${tp}`, W - M, 292, { align: 'right' })
     }
 
@@ -745,8 +779,11 @@ export default function App() {
         <div style={{ background: '#fff', border: '1px solid #d0d5e8', borderRadius: 8, padding: '0 14px', display: 'flex', alignItems: 'center', fontSize: 13, color: '#6670a0', whiteSpace: 'nowrap' }}>
           {obs.length === 1 ? '1 havainto' : `${obs.length} havaintoa`}
         </div>
-        <button onClick={exportPDF} style={{ flex: 1, padding: 13, background: '#1a2fcc', border: 'none', borderRadius: 8, color: '#fff', fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          📄 Luo PDF
+        <button onClick={() => exportPDF('fi')} style={{ flex: 1, padding: 12, background: '#1a2fcc', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          📄 PDF FI
+        </button>
+        <button onClick={() => exportPDF('en')} style={{ flex: 1, padding: 12, background: '#fff', border: '1.5px solid #1a2fcc', borderRadius: 8, color: '#1a2fcc', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          📄 PDF EN
         </button>
       </div>
 
