@@ -227,19 +227,6 @@ export default function App() {
         doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
         doc.text('Sijainti kartalla:', M + 2, y); y += 4
         try {
-          // Render full map to canvas at high res
-          const mapW = 1800, mapH = Math.round(mapData.H / mapData.W * 1800)
-          const mapCanvas = document.createElement('canvas')
-          mapCanvas.width = mapW; mapCanvas.height = mapH
-          const mctx = mapCanvas.getContext('2d')
-          mctx.fillStyle = '#eef4ec'; mctx.fillRect(0, 0, mapW, mapH)
-          const scx = mapW / mapData.W, scy = mapH / mapData.H
-
-          mctx.fillStyle = 'rgba(200,223,245,0.85)'; mctx.strokeStyle = '#4a90d9'; mctx.lineWidth = 1.5
-          mapData.pvAreas.forEach(pts => {
-            mctx.beginPath(); pts.forEach(([x,y2],i) => i===0 ? mctx.moveTo(x*scx,y2*scy) : mctx.lineTo(x*scx,y2*scy))
-            mctx.closePath(); mctx.fill(); mctx.stroke()
-          })
           const PANEL_W = 1.15, TABLE_D = 4.29
           const sxm = mapData.W / (mapData.maxX - mapData.minX)
           const sym = mapData.H / (mapData.maxY - mapData.minY)
@@ -255,19 +242,6 @@ export default function App() {
               pinRowIdx = idx
             }
           })
-
-          mapData.inserts.forEach((ins, idx) => {
-            const tw = ins.panels * PANEL_W * sxm * scx
-            const th = TABLE_D * sym * scy
-            const isPinRow = idx === pinRowIdx
-            mctx.fillStyle = isPinRow ? 'rgba(214,48,48,0.35)' : 'rgba(26,47,204,0.22)'
-            mctx.strokeStyle = isPinRow ? '#d63030' : '#1a2fcc'
-            mctx.lineWidth = isPinRow ? 2.5 : 0.8
-            mctx.fillRect(ins.x*scx, ins.y*scy, tw, th)
-            mctx.strokeRect(ins.x*scx, ins.y*scy, tw, th)
-          })
-
-          // Find the label closest to the highlighted row's end point, to draw it emphasized
           let pinLabelIdx = -1
           if (pinRowIdx >= 0) {
             const ins = mapData.inserts[pinRowIdx]
@@ -279,56 +253,80 @@ export default function App() {
             })
           }
 
+          // Work out the crop window (in SVG units) using the zoom level left
+          // on screen, centered on the pin — not the saved pan position, so a
+          // stray pan afterwards can't drag the crop to an unrelated spot.
+          const view = o.mapView || { scale: 1, containerW: 360, containerH: 240 }
+          const scale = view.scale || 1
+          const containerW = view.containerW || 360, containerH = view.containerH || 240
+          const vtx = containerW / 2 - pinSvgX * scale
+          const vty = containerH / 2 - pinSvgY * scale
+          const svgX0 = Math.max(0, (-vtx) / scale)
+          const svgY0 = Math.max(0, (-vty) / scale)
+          const svgX1 = Math.min(mapData.W, (containerW - vtx) / scale)
+          const svgY1 = Math.min(mapData.H, (containerH - vty) / scale)
+          const svgCropW = Math.max(1, svgX1 - svgX0), svgCropH = Math.max(1, svgY1 - svgY0)
+
+          // Render straight to the crop's own resolution (rather than
+          // rendering the whole site at a fixed size and cropping a sliver
+          // out of it) — this is what was causing the blurriness: a tight
+          // zoom only used a small slice of pixels that then had to be
+          // stretched up to fill the PDF. Fixed output resolution here means
+          // the result stays sharp no matter how far the installer zoomed.
+          const outW = 900, outH = Math.round(outW * svgCropH / svgCropW)
+          const mapCanvas = document.createElement('canvas')
+          mapCanvas.width = outW; mapCanvas.height = outH
+          const mctx = mapCanvas.getContext('2d')
+          mctx.fillStyle = '#eef4ec'; mctx.fillRect(0, 0, outW, outH)
+          const kx = outW / svgCropW, ky = outH / svgCropH
+          const px = sx => (sx - svgX0) * kx, py = sy => (sy - svgY0) * ky
+
+          mctx.fillStyle = 'rgba(200,223,245,0.85)'; mctx.strokeStyle = '#4a90d9'; mctx.lineWidth = 1.2
+          mapData.pvAreas.forEach(pts => {
+            mctx.beginPath(); pts.forEach(([x,y2],i) => i===0 ? mctx.moveTo(px(x),py(y2)) : mctx.lineTo(px(x),py(y2)))
+            mctx.closePath(); mctx.fill(); mctx.stroke()
+          })
+
+          mapData.inserts.forEach((ins, idx) => {
+            const tw = ins.panels * PANEL_W * sxm * kx
+            const th = TABLE_D * sym * ky
+            const isPinRow = idx === pinRowIdx
+            mctx.fillStyle = isPinRow ? 'rgba(214,48,48,0.35)' : 'rgba(26,47,204,0.22)'
+            mctx.strokeStyle = isPinRow ? '#d63030' : '#1a2fcc'
+            mctx.lineWidth = isPinRow ? 2 : 0.7
+            mctx.fillRect(px(ins.x), py(ins.y), tw, th)
+            mctx.strokeRect(px(ins.x), py(ins.y), tw, th)
+          })
+
           mctx.textAlign = 'center'
           mapData.rowNumbers.forEach((t, idx) => {
             const isPinLabel = idx === pinLabelIdx
             if (isPinLabel) {
-              mctx.font = 'bold 13px sans-serif'
+              mctx.font = 'bold 17px sans-serif'
               mctx.fillStyle = '#d63030'
-              mctx.fillRect(t.x*scx-11, t.y*scy-10, 22, 14)
+              mctx.fillRect(px(t.x)-14, py(t.y)-13, 28, 18)
               mctx.fillStyle = '#ffffff'
-              mctx.fillText(t.text, t.x*scx, t.y*scy+2)
+              mctx.fillText(t.text, px(t.x), py(t.y)+3)
             } else {
-              mctx.font = 'bold 9px sans-serif'
+              mctx.font = 'bold 12px sans-serif'
               mctx.fillStyle = 'rgba(255,255,255,0.75)'
-              mctx.fillRect(t.x*scx-7, t.y*scy-6, 14, 9)
+              mctx.fillRect(px(t.x)-9, py(t.y)-9, 18, 12)
               mctx.fillStyle = '#0d1a6e'
-              mctx.fillText(t.text, t.x*scx, t.y*scy+1)
+              mctx.fillText(t.text, px(t.x), py(t.y)+1)
             }
           })
-          // Draw pin
-          const pinX = o.pin.x * mapW, pinY = o.pin.y * mapH
-          mctx.beginPath(); mctx.arc(pinX, pinY, 5, 0, Math.PI*2)
+
+          // Pin — kept deliberately small since several faults can sit close
+          // together on the same row.
+          mctx.beginPath(); mctx.arc(px(pinSvgX), py(pinSvgY), 4, 0, Math.PI*2)
           mctx.fillStyle = '#d63030'; mctx.fill()
-          mctx.strokeStyle = 'white'; mctx.lineWidth = 1.5; mctx.stroke()
+          mctx.strokeStyle = 'white'; mctx.lineWidth = 1.2; mctx.stroke()
 
-          // Use the zoom level (scale) left on screen for this observation,
-          // but always center the crop on the pin itself rather than trusting
-          // the saved pan position — otherwise if the map got panned around
-          // after the pin was placed, the crop can drift to an unrelated part
-          // of the site.
-          const view = o.mapView || { scale: 1, containerW: 360, containerH: 240 }
-          const scale = view.scale || 1
-          const containerW = view.containerW || 360, containerH = view.containerH || 240
-          const tx = containerW / 2 - pinSvgX * scale
-          const ty = containerH / 2 - pinSvgY * scale
-          const visX1 = Math.max(0, (-tx) / scale)
-          const visY1 = Math.max(0, (-ty) / scale)
-          const visX2 = Math.min(mapData.W, (containerW - tx) / scale)
-          const visY2 = Math.min(mapData.H, (containerH - ty) / scale)
-          const cx1 = visX1 * scx, cy1 = visY1 * scy
-          const cx2 = visX2 * scx, cy2 = visY2 * scy
-          const cropWpx = Math.max(1, cx2 - cx1), cropHpx = Math.max(1, cy2 - cy1)
-
-          const cropCanvas = document.createElement('canvas')
-          cropCanvas.width = Math.round(cropWpx); cropCanvas.height = Math.round(cropHpx)
-          cropCanvas.getContext('2d').drawImage(mapCanvas, cx1, cy1, cropWpx, cropHpx, 0, 0, cropWpx, cropHpx)
-          const cropImg = cropCanvas.toDataURL('image/jpeg', 0.92)
-
-          let pdfW = 130, pdfH = pdfW * (cropHpx / cropWpx)
-          if (pdfH > 90) { pdfH = 90; pdfW = pdfH * (cropWpx / cropHpx) }
+          const mapImg = mapCanvas.toDataURL('image/jpeg', 0.95)
+          let pdfW = 130, pdfH = pdfW * (outH / outW)
+          if (pdfH > 90) { pdfH = 90; pdfW = pdfH * (outW / outH) }
           if (y + pdfH > 278) { doc.addPage(); y = 18 }
-          doc.addImage(cropImg, 'JPEG', M, y, pdfW, pdfH)
+          doc.addImage(mapImg, 'JPEG', M, y, pdfW, pdfH)
           y += pdfH + 4
         } catch(e) { console.error('Map PDF:', e) }
       }
