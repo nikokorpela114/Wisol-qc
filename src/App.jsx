@@ -17,6 +17,32 @@ const CATS = [
 
 let idCounter = 0
 const DRAFT_KEY = 'wisol_qc_draft_v1'
+const PANEL_W_M = 1.15
+const TABLE_DEPTH_M = 4.29
+
+// Given mapData and a normalized pin ({x,y} as 0..1 fractions of mapData.W/H),
+// find which row the pin lands in and the nearest row-number label. Used to
+// show a "detected row" hint in the UI so nobody has to eyeball/count rows.
+function findPinRow(mapData, pin) {
+  if (!mapData || !pin || !mapData.inserts?.length) return null
+  const sxm = mapData.W / (mapData.maxX - mapData.minX)
+  const sym = mapData.H / (mapData.maxY - mapData.minY)
+  const psx = pin.x * mapData.W, psy = pin.y * mapData.H
+  let rowIdx = -1
+  mapData.inserts.forEach((ins, idx) => {
+    const tw = ins.panels * PANEL_W_M * sxm, th = TABLE_DEPTH_M * sym
+    if (psx >= ins.x - 3 && psx <= ins.x + tw + 3 && psy >= ins.y - 3 && psy <= ins.y + th + 3) rowIdx = idx
+  })
+  if (rowIdx < 0) return null
+  const ins = mapData.inserts[rowIdx]
+  const targetX = ins.x + ins.panels * PANEL_W_M * sxm, targetY = ins.y + (TABLE_DEPTH_M * sym) / 2
+  let best = Infinity, label = null
+  mapData.rowNumbers.forEach(t => {
+    const d = Math.hypot(t.x - targetX, t.y - targetY)
+    if (d < best) { best = d; label = t.text }
+  })
+  return label ? { rowIdx, label } : null
+}
 
 const KNOWN_SITES = [
   { key: 'isoneva', label: 'Isoneva, Suonenjoki' },
@@ -181,10 +207,19 @@ export default function App() {
 
   function addObs() {
     const id = ++idCounter
-    setObs(prev => [...prev, { id, cat: CATS[0], sev: 'Huomio', note: '', muu: '', photos: [], pin: null, db_id: null }])
+    setObs(prev => [...prev, { id, cat: CATS[0], sev: 'Huomio', note: '', muu: '', photos: [], pin: null, db_id: null, createdAt: new Date().toISOString() }])
+  }
+
+  function newReport() {
+    if (obs.length > 0 && !window.confirm('Aloitetaanko uusi raportti? Nykyiset havainnot poistetaan tältä laitteelta (jo pilveen tallentuneet säilyvät Supabasessa ennallaan).')) return
+    setObs([])
+    setInspector('')
+    setRivi('')
+    try { localStorage.removeItem(DRAFT_KEY) } catch {}
   }
 
   function removeObs(id) {
+    if (!window.confirm('Poistetaanko tämä havainto?')) return
     setObs(prev => {
       const o = prev.find(x => x.id === id)
       if (o?.db_id) sb.from('observations').delete().eq('id', o.db_id)
@@ -325,6 +360,12 @@ export default function App() {
       doc.text(o.sev, W - M - 4, y + 5, { align: 'right' })
       y += 10
 
+      if (o.createdAt) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140)
+        doc.text(new Date(o.createdAt).toLocaleTimeString('fi-FI', { hour: '2-digit', minute: '2-digit' }), M + 2, y)
+        y += 4
+      }
+
       if (o.note) {
         doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(40, 40, 40)
         const lines = doc.splitTextToSize(o.note, CW - 4)
@@ -335,7 +376,8 @@ export default function App() {
       if (o.pin && mapData) {
         if (y + 150 > 278) { doc.addPage(); y = 18 }
         doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
-        doc.text('Sijainti kartalla:', M + 2, y); y += 4
+        const detectedRow = findPinRow(mapData, o.pin)
+        doc.text(`Sijainti kartalla:${detectedRow ? '  (rivi ' + detectedRow.label + ')' : ''}`, M + 2, y); y += 4
         try {
           const PANEL_W = 1.15, TABLE_D = 4.29
           const sxm = mapData.W / (mapData.maxX - mapData.minX)
@@ -529,6 +571,9 @@ export default function App() {
           </select>
           <input style={inputStyle} placeholder="Tarkastaja" value={inspector} onChange={e => setInspector(e.target.value)} />
           <input style={inputStyle} placeholder="Rivi / alue (esim. A7-45)" value={rivi} onChange={e => setRivi(e.target.value)} />
+          <button onClick={newReport} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: '#6670a0', padding: '2px 0' }}>
+            🔄 Uusi raportti
+          </button>
         </div>
 
         {/* DXF upload if no map */}
@@ -573,6 +618,11 @@ export default function App() {
                   )}
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {o.createdAt && (
+                    <span style={{ fontSize: 10, color: '#9aa2c0', fontWeight: 500 }}>
+                      {new Date(o.createdAt).toLocaleTimeString('fi-FI', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
                   <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: sevBg[o.sev], color: sevColor[o.sev] }}>{o.sev}</span>
                   <button onClick={() => removeObs(o.id)} style={{ background: 'none', border: 'none', color: '#6670a0', fontSize: 18 }}>🗑</button>
                 </div>
@@ -627,6 +677,14 @@ export default function App() {
                       gpsCoords={gpsCoords}
                       onViewChange={view => setMapView(o.id, view)}
                     />
+                    {o.pin && (() => {
+                      const r = findPinRow(mapData, o.pin)
+                      return r ? (
+                        <div style={{ marginTop: 4, fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
+                          📍 Havaittu rivi: {r.label}
+                        </div>
+                      ) : null
+                    })()}
                   </div>
                 )}
 
