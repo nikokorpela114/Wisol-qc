@@ -221,9 +221,9 @@ export default function App() {
         doc.text(lines, M + 2, y); y += lines.length * 5 + 3
       }
 
-      // Map thumbnail - shows exactly the zoomed view from the app
+      // Map thumbnail - full site map with the pin's row highlighted in red
       if (o.pin && mapData) {
-        if (y + 68 > 278) { doc.addPage(); y = 18 }
+        if (y + 96 > 278) { doc.addPage(); y = 18 }
         doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
         doc.text('Sijainti kartalla:', M + 2, y); y += 4
         try {
@@ -302,32 +302,16 @@ export default function App() {
           mctx.fillStyle = '#d63030'; mctx.fill()
           mctx.strokeStyle = 'white'; mctx.lineWidth = 3.5; mctx.stroke()
 
-          // Determine crop area from saved mapView (zoom/pan state).
-          // containerW/containerH come from the actual on-screen map element
-          // at the moment the view last changed — this varies by device width,
-          // so we no longer assume a fixed size.
-          const view = o.mapView || { scale: 1, tx: 0, ty: 0, containerW: 360, containerH: 240 }
-          const containerW = view.containerW || 360, containerH = view.containerH || 240
-          // What portion of the SVG (W×H) was visible in the container?
-          // visible SVG region: x = (-view.tx)/view.scale to (containerW - view.tx)/view.scale
-          const visX1 = Math.max(0, (-view.tx) / view.scale)
-          const visY1 = Math.max(0, (-view.ty) / view.scale)
-          const visX2 = Math.min(mapData.W, (containerW - view.tx) / view.scale)
-          const visY2 = Math.min(mapData.H, (containerH - view.ty) / view.scale)
-          // Convert to canvas pixels
-          const cx1 = visX1 * scx, cy1 = visY1 * scy
-          const cx2 = visX2 * scx, cy2 = visY2 * scy
-          const cropW = Math.max(1, cx2 - cx1), cropH = Math.max(1, cy2 - cy1)
-
-          const cropCanvas = document.createElement('canvas')
-          cropCanvas.width = Math.round(cropW); cropCanvas.height = Math.round(cropH)
-          cropCanvas.getContext('2d').drawImage(mapCanvas, cx1, cy1, cropW, cropH, 0, 0, cropW, cropH)
-
-          // Fit crop into 90mm wide space keeping aspect ratio, max 70mm tall
-          const pdfW = 90, pdfH = Math.min(70, pdfW * cropH / cropW)
-          const cropImg = cropCanvas.toDataURL('image/jpeg', 0.92)
+          // Show the full map — same wide view the app shows by default —
+          // rather than cropping to whatever zoom level happened to be active
+          // when the pin was placed. The highlighted row + enlarged red number
+          // already make the exact location easy to find at this zoom level.
+          const maxW = 130, maxH = 90
+          const fitScale = Math.min(maxW / mapW, maxH / mapH)
+          const pdfW = mapW * fitScale, pdfH = mapH * fitScale
+          const mapImg = mapCanvas.toDataURL('image/jpeg', 0.92)
           if (y + pdfH > 278) { doc.addPage(); y = 18 }
-          doc.addImage(cropImg, 'JPEG', M, y, pdfW, pdfH)
+          doc.addImage(mapImg, 'JPEG', M, y, pdfW, pdfH)
           y += pdfH + 4
         } catch(e) { console.error('Map PDF:', e) }
       }
