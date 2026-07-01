@@ -16,6 +16,7 @@ const CATS = [
 ]
 
 let idCounter = 0
+const DRAFT_KEY = 'wisol_qc_draft_v1'
 
 const KNOWN_SITES = [
   { key: 'isoneva', label: 'Isoneva, Suonenjoki' },
@@ -36,8 +37,14 @@ export default function App() {
   const [pdfBlob, setPdfBlob] = useState(null)
   const [pdfName, setPdfName] = useState('')
   const [pdfDownloaded, setPdfDownloaded] = useState(false)
+  const [isOnline, setIsOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine)
   const fileInputRef = useRef(null)
   const syncTimer = useRef(null)
+  const restoredRef = useRef(false)
+  const obsRef = useRef(obs)
+  const metaRef = useRef({ site, inspector, rivi })
+  useEffect(() => { obsRef.current = obs }, [obs])
+  useEffect(() => { metaRef.current = { site, inspector, rivi } }, [site, inspector, rivi])
 
   // GPS — convert ETRS-TM35FIN (EPSG:3067) coords from the DXF to lat/lng on the fly
   useEffect(() => {
@@ -89,15 +96,88 @@ export default function App() {
     }
     try {
       if (o.db_id) {
-        await sb.from('observations').update(data).eq('id', o.db_id)
+        const { error } = await sb.from('observations').update(data).eq('id', o.db_id)
+        if (error) throw error
+        showSync('✓ Tallennettu')
+        return o.db_id
       } else {
-        const { data: res } = await sb.from('observations').insert([data]).select()
-        if (res?.[0]) return res[0].id
+        const { data: res, error } = await sb.from('observations').insert([data]).select()
+        if (error) throw error
+        if (res?.[0]) {
+          // Write the new Supabase id straight back into state — otherwise
+          // every later edit would insert a new duplicate row instead of
+          // updating this one, since o.db_id would still read as null.
+          setObs(prev => prev.map(x => x.id === o.id ? { ...x, db_id: res[0].id } : x))
+          showSync('✓ Tallennettu')
+          return res[0].id
+        }
       }
-      showSync('✓ Tallennettu')
-    } catch { showSync('⚠ Ei yhteyttä') }
+    } catch {
+      showSync('⚠ Ei yhteyttä — tallessa vain paikallisesti')
+      return null
+    }
     return null
   }
+
+  // Retry any observations that never made it to Supabase (offline edits,
+  // failed requests). Reads the latest state via obsRef/metaRef so it never
+  // acts on stale data.
+  function retrySync() {
+    obsRef.current.forEach(o => {
+      if (!o.db_id) {
+        const { site: s, inspector: ins, rivi: r } = metaRef.current
+        saveObs(o, s, ins, r)
+      }
+    })
+  }
+
+  // Restore a locally-saved draft (survives closed tabs, crashes, and time
+  // spent fully offline) as soon as the app opens.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY)
+      if (raw) {
+        const draft = JSON.parse(raw)
+        if (draft.obs?.length) {
+          setObs(draft.obs)
+          idCounter = Math.max(idCounter, ...draft.obs.map(o => o.id || 0))
+          if (draft.site) setSite(draft.site)
+          if (draft.inspector) setInspector(draft.inspector)
+          if (draft.rivi) setRivi(draft.rivi)
+          if (draft.currentSiteKey) setCurrentSiteKey(draft.currentSiteKey)
+          showSync('↺ Luonnos palautettu')
+        }
+      }
+    } catch {}
+    restoredRef.current = true
+  }, [])
+
+  // Keep a local copy of the whole draft on every change — this is the real
+  // safety net. It works regardless of network status, so nothing is lost if
+  // the installer loses signal or the browser closes mid-entry.
+  useEffect(() => {
+    if (!restoredRef.current) return
+    try {
+      const toSave = { site, inspector, rivi, currentSiteKey, obs: obs.map(({ _timer, ...rest }) => rest) }
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(toSave))
+    } catch {
+      // Quota exceeded or storage unavailable — cloud sync still applies when back online
+    }
+  }, [obs, site, inspector, rivi, currentSiteKey])
+
+  // Track connectivity and retry pending saves as soon as the connection is back
+  useEffect(() => {
+    const goOnline = () => { setIsOnline(true); showSync('🌐 Yhteys palautui, synkronoidaan...'); retrySync() }
+    const goOffline = () => { setIsOnline(false); showSync('⚠ Ei verkkoyhteyttä') }
+    window.addEventListener('online', goOnline)
+    window.addEventListener('offline', goOffline)
+    const t = setInterval(() => { if (navigator.onLine) retrySync() }, 30000)
+    return () => {
+      window.removeEventListener('online', goOnline)
+      window.removeEventListener('offline', goOffline)
+      clearInterval(t)
+    }
+  }, [])
 
   function addObs() {
     const id = ++idCounter
@@ -117,7 +197,13 @@ export default function App() {
       if (o.id !== id) return o
       const updated = { ...o, [key]: val }
       clearTimeout(updated._timer)
-      updated._timer = setTimeout(() => saveObs(updated, site, inspector, rivi), 1200)
+      updated._timer = setTimeout(() => {
+        const latest = obsRef.current.find(x => x.id === id)
+        if (latest) {
+          const { site: s, inspector: ins, rivi: r } = metaRef.current
+          saveObs(latest, s, ins, r)
+        }
+      }, 1200)
       return updated
     }))
   }
@@ -135,17 +221,40 @@ export default function App() {
     setObs(prev => prev.map(o => o.id !== id ? o : { ...o, mapView: view }))
   }
 
-  function addPhotos(id, files) {
-    Array.from(files).forEach(file => {
+  // Downscale + re-encode straight away. Raw phone photos can be several MB
+  // each, which is both slow to work with and too big to keep safely in a
+  // local backup — this keeps them small without a noticeable quality loss
+  // in the PDF (which is only ever printed at CW page width anyway).
+  function compressImage(file, maxDim = 1600, quality = 0.75) {
+    return new Promise(resolve => {
       const reader = new FileReader()
       reader.onload = e => {
-        setObs(prev => prev.map(o => {
-          if (o.id !== id) return o
-          return { ...o, photos: [...o.photos, { src: e.target.result }] }
-        }))
+        const img = new Image()
+        img.onload = () => {
+          let { width, height } = img
+          if (width > maxDim || height > maxDim) {
+            const scale = maxDim / Math.max(width, height)
+            width = Math.round(width * scale); height = Math.round(height * scale)
+          }
+          const c = document.createElement('canvas')
+          c.width = width; c.height = height
+          c.getContext('2d').drawImage(img, 0, 0, width, height)
+          resolve(c.toDataURL('image/jpeg', quality))
+        }
+        img.onerror = () => resolve(e.target.result)
+        img.src = e.target.result
       }
+      reader.onerror = () => resolve(null)
       reader.readAsDataURL(file)
     })
+  }
+
+  async function addPhotos(id, files) {
+    for (const file of Array.from(files)) {
+      const src = await compressImage(file)
+      if (!src) continue
+      setObs(prev => prev.map(o => o.id !== id ? o : { ...o, photos: [...o.photos, { src }] }))
+    }
   }
 
   function removePhoto(id, pi) {
@@ -393,6 +502,9 @@ export default function App() {
           <span style={{ fontSize: 19, fontWeight: 800, color: 'white', letterSpacing: 1 }}>WISOL</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {!isOnline && (
+            <span style={{ fontSize: 11, color: '#1a2fcc', fontWeight: 700, background: '#f5a800', padding: '3px 8px', borderRadius: 20 }}>⚠ Offline</span>
+          )}
           {syncMsg && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)' }}>{syncMsg}</span>}
           <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', fontWeight: 500 }}>Vikalista</span>
         </div>
@@ -454,7 +566,12 @@ export default function App() {
             <div key={o.id} style={{ background: '#fff', border: '1px solid #d0d5e8', borderRadius: 12, overflow: 'hidden' }}>
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', background: '#eef0f7', borderBottom: '1px solid #d0d5e8' }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#6670a0', letterSpacing: 0.5, textTransform: 'uppercase' }}>Havainto {idx + 1}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#6670a0', letterSpacing: 0.5, textTransform: 'uppercase' }}>
+                  Havainto {idx + 1}
+                  {!o.db_id && (
+                    <span title="Ei vielä synkronoitu pilveen — tallessa paikallisesti" style={{ marginLeft: 6, color: '#d07800' }}>●</span>
+                  )}
+                </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: sevBg[o.sev], color: sevColor[o.sev] }}>{o.sev}</span>
                   <button onClick={() => removeObs(o.id)} style={{ background: 'none', border: 'none', color: '#6670a0', fontSize: 18 }}>🗑</button>
