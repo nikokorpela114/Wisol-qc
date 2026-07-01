@@ -127,7 +127,10 @@ export default function App() {
         showSync('✓ Tallennettu')
         return o.db_id
       } else {
-        const { data: res, error } = await sb.from('observations').insert([data]).select()
+        // created_at only set on the first insert — it should reflect when
+        // the fault was actually spotted, even if the sync itself happens
+        // later (offline catch-up), not overwritten by DB default on retry.
+        const { data: res, error } = await sb.from('observations').insert([{ ...data, created_at: o.createdAt || new Date().toISOString() }]).select()
         if (error) throw error
         if (res?.[0]) {
           // Write the new Supabase id straight back into state — otherwise
@@ -138,8 +141,14 @@ export default function App() {
           return res[0].id
         }
       }
-    } catch {
-      showSync('⚠ Ei yhteyttä — tallessa vain paikallisesti')
+    } catch (e) {
+      // Log the real reason to the console — a schema/permission error
+      // (e.g. unknown column, RLS block) looks identical to "no network"
+      // from the UI's point of view otherwise, which makes it very hard to
+      // tell the two apart when something isn't saving.
+      console.error('saveObs failed:', e)
+      const looksLikeNetwork = !navigator.onLine || e?.message?.toLowerCase().includes('fetch')
+      showSync(looksLikeNetwork ? '⚠ Ei yhteyttä — tallessa vain paikallisesti' : '⚠ Tallennusvirhe (katso konsoli)')
       return null
     }
     return null
