@@ -250,12 +250,12 @@ export default function App() {
             mctx.fillRect(ins.x*scx, ins.y*scy, tw, th)
             mctx.strokeRect(ins.x*scx, ins.y*scy, tw, th)
           })
-          mctx.font = 'bold 18px sans-serif'; mctx.textAlign = 'center'
+          mctx.font = 'bold 11px sans-serif'; mctx.textAlign = 'center'
           mapData.rowNumbers.forEach(t => {
             mctx.fillStyle = 'rgba(255,255,255,0.75)'
-            mctx.fillRect(t.x*scx-14, t.y*scy-14, 28, 16)
+            mctx.fillRect(t.x*scx-9, t.y*scy-8, 18, 11)
             mctx.fillStyle = '#0d1a6e'
-            mctx.fillText(t.text, t.x*scx, t.y*scy)
+            mctx.fillText(t.text, t.x*scx, t.y*scy+2)
           })
           // Draw pin
           const pinX = o.pin.x * mapW, pinY = o.pin.y * mapH
@@ -263,11 +263,12 @@ export default function App() {
           mctx.fillStyle = '#d63030'; mctx.fill()
           mctx.strokeStyle = 'white'; mctx.lineWidth = 3.5; mctx.stroke()
 
-          // Determine crop area from saved mapView (zoom/pan state)
-          // mapView.tx, ty, scale describe how the map was displayed in the 240px container
-          // Container was 240px tall, width ~360px
-          const containerW = 360, containerH = 240
-          const view = o.mapView || { scale: 1, tx: 0, ty: 0 }
+          // Determine crop area from saved mapView (zoom/pan state).
+          // containerW/containerH come from the actual on-screen map element
+          // at the moment the view last changed — this varies by device width,
+          // so we no longer assume a fixed size.
+          const view = o.mapView || { scale: 1, tx: 0, ty: 0, containerW: 360, containerH: 240 }
+          const containerW = view.containerW || 360, containerH = view.containerH || 240
           // What portion of the SVG (W×H) was visible in the container?
           // visible SVG region: x = (-view.tx)/view.scale to (containerW - view.tx)/view.scale
           const visX1 = Math.max(0, (-view.tx) / view.scale)
