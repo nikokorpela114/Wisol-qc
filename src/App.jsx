@@ -339,7 +339,7 @@ export default function App() {
         c.getContext('2d').drawImage(img, 0, 0)
         const corrected = c.toDataURL('image/jpeg', 0.85)
         const nw = img.naturalWidth || 800, nh = img.naturalHeight || 600
-        const sc = Math.min(CW / nw, 150 / nh)
+        const sc = Math.min(CW / nw, 250 / nh)
         const dw = nw * sc, dh = nh * sc
         if (y + dh > 278) { doc.addPage(); y = 18 }
         try { doc.addImage(corrected, 'JPEG', M, y, dw, dh) } catch {}
