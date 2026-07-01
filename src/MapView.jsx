@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
 
-const PANEL_W_M = 6    // meters wide per table
-const PANEL_H_M = 1.1  // meters per panel row
+const PANEL_W_M = 1.15   // meters per panel (width along X)
+const TABLE_DEPTH_M = 4.29  // meters deep (Y direction, always fixed)
 
 export default function MapView({ mapData, pin, onPin, gpsCoords }) {
   const containerRef = useRef(null)
@@ -262,43 +262,52 @@ export default function MapView({ mapData, pin, onPin, gpsCoords }) {
             />
           ))}
 
-          {/* Panel tables - axis-aligned: wide along X (panel row direction),
-              narrow along Y (table depth). Confirmed from DXF: tables in the
-              same row share Y and are spaced widely apart in X. */}
+          {/* Panel tables: insert point = top-left corner in SVG coords.
+              Width = panels × 1.15m along X, depth = 4.29m downward in SVG (positive Y). */}
           {inserts.map((ins, i) => {
             const scaleXm = W / (maxX - minX)
             const scaleYm = H / (maxY - minY)
-            const tw = ins.panels * PANEL_W_M * scaleXm / 22
-            const th = PANEL_H_M * 6 * scaleYm
+            const tw = ins.panels * PANEL_W_M * scaleXm
+            const th = TABLE_DEPTH_M * scaleYm
             return (
               <rect
                 key={`ins${i}`}
-                x={ins.x - tw}
-                y={ins.y - th}
+                x={ins.x}
+                y={ins.y}
                 width={tw}
                 height={th}
                 fill="#1a2fcc"
-                fillOpacity={0.18}
+                fillOpacity={0.25}
                 stroke="#1a2fcc"
-                strokeWidth={strokeW * 0.5}
+                strokeWidth={Math.max(0.5, strokeW)}
               />
             )
           })}
 
-          {/* Row numbers */}
+          {/* Row numbers - white bg for legibility */}
           {rowNumbers.map((t, i) => (
-            <text
-              key={`t${i}`}
-              x={t.x}
-              y={t.y}
-              fontSize={scaledFontSize}
-              fill="#0d1a6e"
-              fontFamily="sans-serif"
-              fontWeight="bold"
-              textAnchor="middle"
-            >
-              {t.text}
-            </text>
+            <g key={`t${i}`}>
+              <rect
+                x={t.x - 8}
+                y={t.y - 8}
+                width={16}
+                height={10}
+                fill="white"
+                fillOpacity={0.75}
+                rx={1}
+              />
+              <text
+                x={t.x}
+                y={t.y}
+                fontSize={Math.max(9, scaledFontSize)}
+                fill="#0d1a6e"
+                fontFamily="sans-serif"
+                fontWeight="bold"
+                textAnchor="middle"
+              >
+                {t.text}
+              </text>
+            </g>
           ))}
         </svg>
 

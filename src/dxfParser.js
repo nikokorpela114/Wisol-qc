@@ -20,7 +20,7 @@ export function parseDXF(text) {
 
   if (!isFinite(minX)) return null
 
-  const W = 1000, H = Math.round((maxY - minY) / (maxX - minX) * 1000)
+  const W = 3000, H = Math.round((maxY - minY) / (maxX - minX) * 3000)
   const tx = x => (x - minX) / (maxX - minX) * W
   const ty = y => H - (y - minY) / (maxY - minY) * H
 
