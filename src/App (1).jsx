@@ -12,7 +12,7 @@ const CATS = [
   'Paneeli rikki', 'Paneeli väärinpäin – ylä', 'Paneeli väärinpäin – ala',
   'Paneelikiinnikkeissä rakoja', 'Kiskon pultti löysä', 'Kiskon pultti puuttuu',
   'Paneelikiinnikkeiden momentit vajaat', 'Kiskot tasaamatta', 'Niittejä puuttuu',
-  'Kannake vääntynyt / rikki', 'DC-kouru katkaisematta', 'Muu asia'
+  'Kannake vääntynyt / rikki', 'DC-kouru katkaisematta', 'Tupla poraruuvit puuttuvat', 'Muu asia'
 ]
 
 let idCounter = 0
