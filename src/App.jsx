@@ -9,10 +9,10 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY)
 
 const CATS = [
-  'Paneeli rikki', 'Paneeli väärinpäin – ylä', 'Paneeli väärinpäin – ala',
-  'Paneelikiinnikkeissä rakoja', 'Kiskon pultti löysä', 'Kiskon pultti puuttuu',
-  'Paneelikiinnikkeiden momentit vajaat', 'Kiskot tasaamatta', 'Niittejä puuttuu',
-  'Kannake vääntynyt / rikki', 'DC-kouru katkaisematta', 'Tupla poraruuvit puuttuvat', 'Muu asia'
+  'Paneeli rikkoutunut', 'Paneeli väärinpäin, yläreuna', 'Paneeli väärinpäin, alareuna',
+  'Paneelikiinnikkeissä rakoja', 'Kiskon pultti löysällä', 'Kiskon pultti puuttuu',
+  'Paneelikiinnikkeiden kiristysmomentit vajaat', 'Kiskot tasaamatta', 'Niittejä puuttuu',
+  'Kannake vääntynyt tai rikki', 'DC-kouru katkaisematta', 'Tupla poraruuvit puuttuvat', 'Muu asia'
 ]
 
 let idCounter = 0
@@ -25,16 +25,16 @@ const TABLE_DEPTH_M = 4.29
 // Finnish internally so existing data/Supabase rows stay consistent; only
 // the PDF rendering picks the right label at export time.
 const CAT_EN = {
-  'Paneeli rikki': 'Panel broken',
-  'Paneeli väärinpäin – ylä': 'Panel upside down – top',
-  'Paneeli väärinpäin – ala': 'Panel upside down – bottom',
+  'Paneeli rikkoutunut': 'Panel broken',
+  'Paneeli väärinpäin, yläreuna': 'Panel upside down – top edge',
+  'Paneeli väärinpäin, alareuna': 'Panel upside down – bottom edge',
   'Paneelikiinnikkeissä rakoja': 'Gaps in panel clamps',
-  'Kiskon pultti löysä': 'Rail bolt loose',
+  'Kiskon pultti löysällä': 'Rail bolt loose',
   'Kiskon pultti puuttuu': 'Rail bolt missing',
-  'Paneelikiinnikkeiden momentit vajaat': 'Panel clamp torque insufficient',
+  'Paneelikiinnikkeiden kiristysmomentit vajaat': 'Panel clamp torque insufficient',
   'Kiskot tasaamatta': 'Rails not aligned',
   'Niittejä puuttuu': 'Rivets missing',
-  'Kannake vääntynyt / rikki': 'Bracket bent / broken',
+  'Kannake vääntynyt tai rikki': 'Bracket bent or broken',
   'DC-kouru katkaisematta': 'DC conduit not cut open',
   'Tupla poraruuvit puuttuvat': 'Double drill screws missing',
   'Muu asia': 'Other',
