@@ -18,14 +18,22 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, onViewChange }
     const scale = Math.min(cw / W, ch / H) * 0.95
     const tx = (cw - W * scale) / 2
     const ty = (ch - H * scale) / 2
-    stateRef.current = { scale, tx, ty }
-    setTransform({ scale, tx, ty })
+    const s = { scale, tx, ty }
+    stateRef.current = s
+    setTransform(s)
+    // Report the initial auto-fit view too — otherwise an observation whose
+    // pin was placed without any manual zoom/pan never gets a mapView saved,
+    // and the PDF export falls back to a wrong default (scale 1, tx/ty 0).
+    if (onViewChange) onViewChange({ ...s, containerW: cw, containerH: ch })
   }, [W, H])
 
   const applyTransform = useCallback((s) => {
     stateRef.current = s
     setTransform({ ...s })
-    if (onViewChange) onViewChange(s)
+    if (onViewChange) {
+      const el = containerRef.current
+      onViewChange({ ...s, containerW: el?.clientWidth, containerH: el?.clientHeight })
+    }
   }, [onViewChange])
 
   const clamp = useCallback((s) => {

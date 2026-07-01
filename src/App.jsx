@@ -221,7 +221,7 @@ export default function App() {
         doc.text(lines, M + 2, y); y += lines.length * 5 + 3
       }
 
-      // Map thumbnail - cropped to a local window around the pin's row, with that row highlighted in red
+      // Map thumbnail - shows exactly the pan/zoom view left on screen for this observation, pin's row highlighted in red
       if (o.pin && mapData) {
         if (y + 96 > 278) { doc.addPage(); y = 18 }
         doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
@@ -302,33 +302,20 @@ export default function App() {
           mctx.fillStyle = '#d63030'; mctx.fill()
           mctx.strokeStyle = 'white'; mctx.lineWidth = 3.5; mctx.stroke()
 
-          // Crop to a local context window around the pin — not the whole
-          // (potentially huge, multi-block) site, and not dependent on
-          // whatever zoom the phone happened to be at. Window size is derived
-          // from the actual row-to-row spacing on this map, so it always
-          // shows roughly the same number of neighbouring rows for context,
-          // however big or small the site is.
-          let rowPitch = mapData.H / 20
-          if (mapData.inserts.length > 1) {
-            const ys = mapData.inserts.map(ins => ins.y).sort((a, b) => a - b)
-            const gaps = []
-            for (let i = 1; i < ys.length; i++) {
-              const g = ys[i] - ys[i - 1]
-              if (g > 0.5) gaps.push(g)
-            }
-            if (gaps.length) {
-              gaps.sort((a, b) => a - b)
-              rowPitch = gaps[Math.floor(gaps.length / 2)]
-            }
-          }
-          const aspect = 130 / 90
-          let cropHs = Math.min(mapData.H, rowPitch * 11)
-          let cropWs = Math.min(mapData.W, cropHs * aspect)
-          let cx0 = Math.max(0, Math.min(mapData.W - cropWs, pinSvgX - cropWs / 2))
-          let cy0 = Math.max(0, Math.min(mapData.H - cropHs, pinSvgY - cropHs / 2))
+          // Crop to exactly the pan/zoom view that was left on screen for
+          // this observation (o.mapView, captured live from MapView.jsx).
+          // containerW/containerH come from the actual on-screen map element
+          // size at that moment, since that varies by device width.
+          const view = o.mapView || { scale: 1, tx: 0, ty: 0, containerW: 360, containerH: 240 }
+          const containerW = view.containerW || 360, containerH = view.containerH || 240
+          const visX1 = Math.max(0, (-view.tx) / view.scale)
+          const visY1 = Math.max(0, (-view.ty) / view.scale)
+          const visX2 = Math.min(mapData.W, (containerW - view.tx) / view.scale)
+          const visY2 = Math.min(mapData.H, (containerH - view.ty) / view.scale)
+          const cx1 = visX1 * scx, cy1 = visY1 * scy
+          const cx2 = visX2 * scx, cy2 = visY2 * scy
+          const cropWpx = Math.max(1, cx2 - cx1), cropHpx = Math.max(1, cy2 - cy1)
 
-          const cx1 = cx0 * scx, cy1 = cy0 * scy
-          const cropWpx = cropWs * scx, cropHpx = cropHs * scy
           const cropCanvas = document.createElement('canvas')
           cropCanvas.width = Math.round(cropWpx); cropCanvas.height = Math.round(cropHpx)
           cropCanvas.getContext('2d').drawImage(mapCanvas, cx1, cy1, cropWpx, cropHpx, 0, 0, cropWpx, cropHpx)
