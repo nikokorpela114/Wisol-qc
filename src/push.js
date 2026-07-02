@@ -2,6 +2,10 @@
 import { sb } from './supabaseClient'
 
 const SUPABASE_FUNCTIONS_URL = 'https://ddgsbamrafhasrtsrsyv.supabase.co/functions/v1/send-push'
+// Sama julkinen anon-avain kuin supabaseClient.js:ssä — Edge Function vaatii
+// tämän Authorization-otsikossa oletuksena, muuten Supabase hylkää koko
+// pyynnön 401:llä ennen kuin se pääsee funktion koodiin asti.
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRkZ3NiYW1yYWZoYXNydHNyc3l2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyODU2MzUsImV4cCI6MjA5Nzg2MTYzNX0.gsbIu5yAUA_iINCGF20p4bSAWJCaEN6UXi8_OlGC3Oc'
 
 // TÄRKEÄÄ: korvaa tämä sillä VAPID_PUBLIC_KEY-arvolla jonka sait — tämä on
 // julkinen avain, se on turvallista pitää selainkoodissa.
@@ -54,9 +58,17 @@ export async function sendPushNotification({ role, installerId = null, title, bo
   try {
     const res = await fetch(SUPABASE_FUNCTIONS_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      },
       body: JSON.stringify({ role, installer_id: installerId, title, body, url, tag }),
     })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      console.error('sendPushNotification: HTTP', res.status, text)
+      return { error: `HTTP ${res.status}`, detail: text }
+    }
     return await res.json()
   } catch (e) {
     console.error('sendPushNotification failed:', e)
