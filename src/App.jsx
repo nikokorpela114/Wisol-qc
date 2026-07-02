@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { createClient } from '@supabase/supabase-js'
 import MapView from './MapView.jsx'
 import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
-
-const SUPABASE_URL = 'https://ddgsbamrafhasrtsrsyv.supabase.co'
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRkZ3NiYW1yYWZoYXNydHNyc3l2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyODU2MzUsImV4cCI6MjA5Nzg2MTYzNX0.gsbIu5yAUA_iINCGF20p4bSAWJCaEN6UXi8_OlGC3Oc'
-const sb = createClient(SUPABASE_URL, SUPABASE_KEY)
+import { sb } from './supabaseClient.js'
+import InstallerView from './InstallerView.jsx'
+import { subscribeToPush, sendPushNotification } from './push.js'
+import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow } from './shared.js'
 
 const CATS = [
   'Paneeli rikkoutunut', 'Paneeli väärinpäin, yläreuna', 'Paneeli väärinpäin, alareuna',
@@ -17,70 +16,14 @@ const CATS = [
 
 let idCounter = 0
 const DRAFT_KEY = 'wisol_qc_draft_v1'
-const PANEL_W_M = 1.15
-const TABLE_DEPTH_M = 4.29
-
-// English translations for the PDF only — the live app UI (used by Finnish
-// site supervisors) stays in Finnish. Stored values (o.cat, o.sev) remain
-// Finnish internally so existing data/Supabase rows stay consistent; only
-// the PDF rendering picks the right label at export time.
-const CAT_EN = {
-  'Paneeli rikkoutunut': 'Panel broken',
-  'Paneeli väärinpäin, yläreuna': 'Panel upside down – top edge',
-  'Paneeli väärinpäin, alareuna': 'Panel upside down – bottom edge',
-  'Paneelikiinnikkeissä rakoja': 'Gaps in panel clamps',
-  'Kiskon pultti löysällä': 'Rail bolt loose',
-  'Kiskon pultti puuttuu': 'Rail bolt missing',
-  'Paneelikiinnikkeiden kiristysmomentit vajaat': 'Panel clamp torque insufficient',
-  'Kiskot tasaamatta': 'Rails not aligned',
-  'Niittejä puuttuu': 'Rivets missing',
-  'Kannake vääntynyt tai rikki': 'Bracket bent or broken',
-  'DC-kouru katkaisematta': 'DC conduit not cut open',
-  'Tupla poraruuvit puuttuvat': 'Double drill screws missing',
-  'Muu asia': 'Other',
-}
-const SEV_EN = { Kriittinen: 'Critical', Huomio: 'Attention', Info: 'Info' }
-const PDF_STR = {
-  fi: {
-    title: 'Laadunvalvontaraportti', site: 'Työmaa', inspector: 'Tarkastaja', rivi: 'Rivi / alue',
-    location: 'Sijainti kartalla:', row: 'rivi', other: 'Muu', footer: 'QC-raportti', dateLocale: 'fi-FI',
-  },
-  en: {
-    title: 'Quality Control Report', site: 'Site', inspector: 'Inspector', rivi: 'Row / area',
-    location: 'Location on map:', row: 'row', other: 'Other', footer: 'QC Report', dateLocale: 'en-GB',
-  },
-}
-
-// Given mapData and a normalized pin ({x,y} as 0..1 fractions of mapData.W/H),
-// find which row the pin lands in and the nearest row-number label. Used to
-// show a "detected row" hint in the UI so nobody has to eyeball/count rows.
-function findPinRow(mapData, pin) {
-  if (!mapData || !pin || !mapData.inserts?.length) return null
-  const sxm = mapData.W / (mapData.maxX - mapData.minX)
-  const sym = mapData.H / (mapData.maxY - mapData.minY)
-  const psx = pin.x * mapData.W, psy = pin.y * mapData.H
-  let rowIdx = -1
-  mapData.inserts.forEach((ins, idx) => {
-    const tw = ins.panels * PANEL_W_M * sxm, th = TABLE_DEPTH_M * sym
-    if (psx >= ins.x - 3 && psx <= ins.x + tw + 3 && psy >= ins.y - 3 && psy <= ins.y + th + 3) rowIdx = idx
-  })
-  if (rowIdx < 0) return null
-  const ins = mapData.inserts[rowIdx]
-  const targetX = ins.x + ins.panels * PANEL_W_M * sxm, targetY = ins.y + (TABLE_DEPTH_M * sym) / 2
-  let best = Infinity, label = null
-  mapData.rowNumbers.forEach(t => {
-    const d = Math.hypot(t.x - targetX, t.y - targetY)
-    if (d < best) { best = d; label = t.text }
-  })
-  return label ? { rowIdx, label } : null
-}
-
-const KNOWN_SITES = [
-  { key: 'isoneva', label: 'Isoneva, Suonenjoki' },
-  { key: 'lamminneva', label: 'Lamminneva, Lappajärvi' },
-]
 
 export default function App() {
+  // ?asentaja avaa karsitun asentajanäkymän tämän saman appin sisällä —
+  // sama Vite-projekti, sama Netlify-deploy, ei erillistä sivustoa.
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('asentaja')) {
+    return <InstallerView />
+  }
+
   const [site, setSite] = useState('Isoneva, Suonenjoki')
   const [inspector, setInspector] = useState('')
   const [rivi, setRivi] = useState('')
@@ -95,6 +38,12 @@ export default function App() {
   const [pdfName, setPdfName] = useState('')
   const [pdfDownloaded, setPdfDownloaded] = useState(false)
   const [isOnline, setIsOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine)
+  const [installers, setInstallers] = useState([])
+  const [assignMode, setAssignMode] = useState(false)
+  const [assignInstallerId, setAssignInstallerId] = useState('')
+  const [newInstallerName, setNewInstallerName] = useState('')
+  const [newInstallerPin, setNewInstallerPin] = useState('')
+  const [assignMsg, setAssignMsg] = useState('')
   const fileInputRef = useRef(null)
   const syncTimer = useRef(null)
   const restoredRef = useRef(false)
@@ -149,7 +98,10 @@ export default function App() {
       cat: o.cat, sev: o.sev, note: o.note, muu: o.muu,
       pin_x: o.pin?.x ?? null, pin_y: o.pin?.y ?? null,
       site: currentSite, inspector: currentInspector, rivi: currentRivi,
-      local_id: o.id
+      local_id: o.id,
+      status: o.status || 'avoin',
+      assigned_installer_id: o.assignedInstallerId ?? null,
+      report_batch: o.reportBatch ?? null,
     }
     try {
       if (o.db_id) {
@@ -256,6 +208,45 @@ export default function App() {
     setInspector('')
     setRivi('')
     try { localStorage.removeItem(DRAFT_KEY) } catch {}
+  }
+
+  useEffect(() => {
+    sb.from('installers').select('*').order('name').then(({ data }) => { if (data) setInstallers(data) })
+  }, [])
+
+  async function addInstaller() {
+    if (!newInstallerName.trim() || newInstallerPin.trim().length < 4) return
+    const { data, error } = await sb.from('installers').insert([{ name: newInstallerName.trim(), pin: newInstallerPin.trim() }]).select()
+    if (!error && data?.[0]) {
+      setInstallers(prev => [...prev, data[0]].sort((a, b) => a.name.localeCompare(b.name)))
+      setAssignInstallerId(data[0].id)
+      setNewInstallerName(''); setNewInstallerPin('')
+    }
+  }
+
+  // Assigns every current observation to the chosen installer, tags them
+  // with a shared report_batch so the installer sees them as one job, and
+  // pushes a real phone notification to that installer.
+  async function assignAndNotify() {
+    if (!assignInstallerId || obs.length === 0) return
+    const reportBatch = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const installer = installers.find(i => i.id === assignInstallerId)
+    setAssignMsg('Lähetetään...')
+
+    const updated = obs.map(o => ({ ...o, assignedInstallerId: assignInstallerId, status: 'avoin', reportBatch }))
+    setObs(updated)
+    await Promise.all(updated.map(o => saveObs(o, site, inspector, rivi)))
+
+    const res = await sendPushNotification({
+      role: 'installer',
+      installerId: assignInstallerId,
+      title: 'Uusi tarkistuslista',
+      body: `${updated.length} havaintoa — ${site}`,
+      url: '/?asentaja=1',
+      tag: reportBatch,
+    })
+    setAssignMsg(res?.sent > 0 ? `✓ Lähetetty ${installer?.name || ''}` : '✓ Tallennettu (asentaja ei ehkä ole vielä ottanut ilmoituksia käyttöön)')
+    setTimeout(() => setAssignMsg(''), 4000)
   }
 
   function removeObs(id) {
@@ -370,6 +361,15 @@ export default function App() {
 
   // PDF export
   async function exportPDF(lang = 'fi') {
+    if (obs.length === 0) {
+      alert('Ei havaintoja lisättynä — lisää vähintään yksi havainto ennen PDF:n luontia.')
+      return
+    }
+    const missingPin = obs.filter(o => mapData && !o.pin).length
+    if (missingPin > 0) {
+      const n = missingPin === 1 ? 'havainnolta puuttuu sijainti kartalta' : `${missingPin} havainnolta puuttuu sijainti kartalta`
+      if (!window.confirm(`${n.charAt(0).toUpperCase() + n.slice(1)}. Luodaanko PDF silti?`)) return
+    }
     const T = PDF_STR[lang] || PDF_STR.fi
     const { jsPDF } = await import('jspdf')
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
@@ -593,13 +593,13 @@ export default function App() {
             <circle cx="148" cy="98" r="17" fill="#f5a800" />
           </svg>
           <span style={{ fontSize: 19, fontWeight: 800, color: 'white', letterSpacing: 1 }}>WISOL</span>
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 2 }}>· Vikalista</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {!isOnline && (
             <span style={{ fontSize: 11, color: '#1a2fcc', fontWeight: 700, background: '#f5a800', padding: '3px 8px', borderRadius: 20 }}>⚠ Offline</span>
           )}
           {syncMsg && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)' }}>{syncMsg}</span>}
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', fontWeight: 500 }}>Vikalista</span>
         </div>
       </div>
 
@@ -624,6 +624,10 @@ export default function App() {
           <input style={inputStyle} placeholder="Rivi / alue (esim. A7-45)" value={rivi} onChange={e => setRivi(e.target.value)} />
           <button onClick={newReport} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: '#6670a0', padding: '2px 0' }}>
             🔄 Uusi raportti
+          </button>
+          <button onClick={async () => { const r = await subscribeToPush('supervisor'); setAssignMsg(r.ok ? '🔔 Ilmoitukset päällä' : (r.reason || 'Ei onnistunut')); setTimeout(() => setAssignMsg(''), 3000) }}
+            style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: '#6670a0', padding: '2px 0' }}>
+            🔔 Salli ilmoitukset (kun asentaja korjaa)
           </button>
         </div>
 
@@ -771,6 +775,33 @@ export default function App() {
           <button onClick={addObs} style={{ width: '100%', padding: 13, border: '1.5px dashed #b0b8d8', borderRadius: 12, background: 'none', color: '#6670a0', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             ＋ Lisää havainto
           </button>
+
+          <button onClick={() => setAssignMode(v => !v)} style={{ width: '100%', padding: 12, border: '1px solid #d0d5e8', borderRadius: 10, background: '#fff', color: '#1a2fcc', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            👷 Lähetä asentajalle {assignMode ? '▲' : '▼'}
+          </button>
+
+          {assignMode && (
+            <div style={{ background: '#fff', border: '1px solid #d0d5e8', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <select value={assignInstallerId} onChange={e => setAssignInstallerId(e.target.value)} style={selectStyle}>
+                <option value="">Valitse asentaja…</option>
+                {installers.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+              </select>
+
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input placeholder="Uusi asentaja: nimi" value={newInstallerName} onChange={e => setNewInstallerName(e.target.value)}
+                  style={{ ...inputStyle, flex: 2 }} />
+                <input placeholder="PIN" value={newInstallerPin} onChange={e => setNewInstallerPin(e.target.value.replace(/\D/g, ''))}
+                  inputMode="numeric" maxLength={6} style={{ ...inputStyle, flex: 1 }} />
+                <button onClick={addInstaller} style={{ padding: '0 12px', background: '#eef0f7', border: '1px solid #d0d5e8', borderRadius: 8, color: '#1a2fcc', fontSize: 13 }}>+</button>
+              </div>
+
+              <button onClick={assignAndNotify} disabled={!assignInstallerId || obs.length === 0}
+                style={{ padding: 12, background: assignInstallerId ? '#1a8a50' : '#c8cce0', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 14 }}>
+                📤 Lähetä {obs.length === 1 ? '1 havainto' : `${obs.length} havaintoa`}
+              </button>
+              {assignMsg && <div style={{ fontSize: 12, color: '#1a8a50', textAlign: 'center' }}>{assignMsg}</div>}
+            </div>
+          )}
         </div>
       </div>
 
