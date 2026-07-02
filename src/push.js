@@ -40,14 +40,39 @@ export async function subscribeToPush(role, installerId = null) {
       })
     }
 
-    await sb.from('push_subscriptions').insert([{
-      role, installer_id: installerId, subscription: sub.toJSON(),
-    }])
+    // Älä kasaa uutta riviä joka kerta kun nappia painetaan samalla
+    // laitteella — lisää vain jos täsmälleen tämä tilaus ei ole jo tallessa.
+    const { data: existing } = await sb.from('push_subscriptions')
+      .select('id')
+      .eq('subscription->>endpoint', sub.endpoint)
+      .eq('role', role)
+      .maybeSingle()
+
+    if (!existing) {
+      await sb.from('push_subscriptions').insert([{
+        role, installer_id: installerId, subscription: sub.toJSON(),
+      }])
+    }
 
     return { ok: true }
   } catch (e) {
     console.error('subscribeToPush failed:', e)
     return { ok: false, reason: e.message }
+  }
+}
+
+// Tarkistaa onko tällä laitteella jo voimassaoleva tilaus — käytetään
+// näyttämään "Ilmoitukset päällä" heti sivun latauduttua, sen sijaan että
+// nappi näyttäisi aina oletustekstiä vaikka tilaus olisi jo aktiivinen.
+export async function getPushStatus() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false
+  try {
+    const reg = await navigator.serviceWorker.getRegistration('/sw.js')
+    if (!reg) return false
+    const sub = await reg.pushManager.getSubscription()
+    return !!sub && Notification.permission === 'granted'
+  } catch {
+    return false
   }
 }
 

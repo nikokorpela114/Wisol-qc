@@ -5,7 +5,7 @@ import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
 import { KNOWN_SITES, findPinRow, CAT_EN, SEV_EN } from './shared.js'
-import { subscribeToPush, sendPushNotification } from './push.js'
+import { subscribeToPush, sendPushNotification, getPushStatus } from './push.js'
 
 const SESSION_KEY = 'wisol_installer_session'
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
@@ -92,6 +92,13 @@ export default function InstallerView() {
     setTasks(data || [])
   }
   useEffect(() => { loadTasks() }, [session])
+
+  // Näytä "Ilmoitukset päällä" heti jos tilaus on jo aktiivinen — ei aina
+  // oletustekstiä vaikka olisi jo tilattu aiemmalla käyntikerralla.
+  useEffect(() => {
+    if (!session) return
+    getPushStatus().then(on => { if (on) setPushMsg(t('notifOnDone')) })
+  }, [session])
 
   // Figure out which site's map to show — first distinct site among open tasks
   useEffect(() => {

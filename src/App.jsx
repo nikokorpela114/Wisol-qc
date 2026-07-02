@@ -4,7 +4,7 @@ import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
 import InstallerView from './InstallerView.jsx'
-import { subscribeToPush, sendPushNotification } from './push.js'
+import { subscribeToPush, sendPushNotification, getPushStatus } from './push.js'
 import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow } from './shared.js'
 
 const CATS = [
@@ -44,6 +44,11 @@ export default function App() {
   const [newInstallerName, setNewInstallerName] = useState('')
   const [newInstallerPin, setNewInstallerPin] = useState('')
   const [assignMsg, setAssignMsg] = useState('')
+  const [supervisorPushOn, setSupervisorPushOn] = useState(false)
+
+  useEffect(() => {
+    getPushStatus().then(setSupervisorPushOn)
+  }, [])
   const fileInputRef = useRef(null)
   const syncTimer = useRef(null)
   const restoredRef = useRef(false)
@@ -625,9 +630,12 @@ export default function App() {
           <button onClick={newReport} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: '#6670a0', padding: '2px 0' }}>
             🔄 Uusi raportti
           </button>
-          <button onClick={async () => { const r = await subscribeToPush('supervisor'); setAssignMsg(r.ok ? '🔔 Ilmoitukset päällä' : (r.reason || 'Ei onnistunut')); setTimeout(() => setAssignMsg(''), 3000) }}
-            style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: '#6670a0', padding: '2px 0' }}>
-            🔔 Salli ilmoitukset (kun asentaja korjaa)
+          <button onClick={async () => {
+              const r = await subscribeToPush('supervisor')
+              if (r.ok) { setSupervisorPushOn(true) } else { setAssignMsg(r.reason || 'Ei onnistunut'); setTimeout(() => setAssignMsg(''), 3000) }
+            }}
+            style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: supervisorPushOn ? '#1a8a50' : '#6670a0', padding: '2px 0', fontWeight: supervisorPushOn ? 700 : 400 }}>
+            {supervisorPushOn ? '🔔 Ilmoitukset päällä' : '🔔 Salli ilmoitukset (kun asentaja korjaa)'}
           </button>
         </div>
 
