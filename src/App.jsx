@@ -34,11 +34,18 @@ function renderGroupMapImage(mapData, items) {
   let minX = Math.min(...pins.map(p => p.x)), maxX = Math.max(...pins.map(p => p.x))
   let minY = Math.min(...pins.map(p => p.y)), maxY = Math.max(...pins.map(p => p.y))
 
-  // Padding: always at least a couple of row-depths so highlighted rows and
-  // pins near the edge of the bounding box aren't cropped off, plus a small
-  // fraction of the span itself for wide-spread groups.
-  const padX = Math.max(th * 2.5, (maxX - minX) * 0.12, 50)
-  const padY = Math.max(th * 2, (maxY - minY) * 0.12, 50)
+  // Padding is defined in real-world METERS (converted to SVG units via
+  // sxm/sym), not a fixed number of SVG units. A fixed SVG-unit padding
+  // doesn't work across sites: the whole DXF is always scaled to the same
+  // ~1000-unit canvas regardless of how many rows the site actually has, so
+  // on a large site with many short rows a "generous-looking" fixed padding
+  // ends up spanning many rows' worth of space — the crop zooms out far
+  // more than intended, and a single long highlighted row just runs off
+  // both edges of the image with no clear sense of where the fault is.
+  // ~9m horizontal / ~7m vertical gives roughly 1–2 table-lengths of
+  // context around the pin(s), consistently, on any site.
+  const padX = Math.max(9 * sxm, (maxX - minX) * 0.15)
+  const padY = Math.max(7 * sym, (maxY - minY) * 0.15)
   const svgX0 = Math.max(0, minX - padX)
   const svgY0 = Math.max(0, minY - padY)
   const svgX1 = Math.min(mapData.W, maxX + padX)
