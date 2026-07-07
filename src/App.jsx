@@ -4,6 +4,7 @@ import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
 import InstallerView from './InstallerView.jsx'
+import Dashboard from './Dashboard.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
 import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow } from './shared.js'
 
@@ -31,14 +32,38 @@ function renderGroupMapImage(mapData, items) {
 
   const pins = items.map(o => ({ x: o.pin.x * mapData.W, y: o.pin.y * mapData.H }))
 
+  // Find each pin's full row (using the shared, bug-fixed findPinRow) once,
+  // and reuse it both for highlighting and for sizing the crop.
+  const rowInfos = items.map(o => findPinRow(mapData, o.pin))
+  const highlightIdx = new Set()
+  const rowLabels = rowInfos.map(info => {
+    if (info) info.rowInsertIdxs.forEach(idx => highlightIdx.add(idx))
+    return info ? info.label : null
+  })
+
   let minX = Math.min(...pins.map(p => p.x)), maxX = Math.max(...pins.map(p => p.x))
   let minY = Math.min(...pins.map(p => p.y)), maxY = Math.max(...pins.map(p => p.y))
 
-  // Padding: always at least a couple of row-depths so highlighted rows and
-  // pins near the edge of the bounding box aren't cropped off, plus a small
-  // fraction of the span itself for wide-spread groups.
-  const padX = Math.max(th * 2.5, (maxX - minX) * 0.12, 50)
-  const padY = Math.max(th * 2, (maxY - minY) * 0.12, 50)
+  // Expand the bounding box to cover each pin's ENTIRE row — every segment
+  // of the chain findPinRow found, not just a fixed radius around the pin
+  // point. A "zoomed enough to see the pin clearly" crop showed only one
+  // anonymous colour block with no row number and no sense of where along
+  // a long row it sat. Showing the whole row (segments + its number label)
+  // instead always gives that context, at the cost of a wider image when
+  // the row itself is long — which is the correct trade-off here.
+  highlightIdx.forEach(idx => {
+    const ins = mapData.inserts[idx]
+    const left = ins.x, right = ins.x + ins.panels * PANEL_W_M * sxm
+    if (left < minX) minX = left
+    if (right > maxX) maxX = right
+    if (ins.y < minY) minY = ins.y
+    if (ins.y + th > maxY) maxY = ins.y + th
+  })
+
+  // Small, mostly fixed margin now — the crop width is already driven by
+  // the row's real extent, not by guesswork padding.
+  const padX = Math.max(6 * sxm, (maxX - minX) * 0.05)
+  const padY = Math.max(9 * sym, (maxY - minY) * 0.2)
   const svgX0 = Math.max(0, minX - padX)
   const svgY0 = Math.max(0, minY - padY)
   const svgX1 = Math.min(mapData.W, maxX + padX)
@@ -57,16 +82,6 @@ function renderGroupMapImage(mapData, items) {
   mapData.pvAreas.forEach(pts => {
     mctx.beginPath(); pts.forEach(([x, y2], i) => i === 0 ? mctx.moveTo(px(x), py(y2)) : mctx.lineTo(px(x), py(y2)))
     mctx.closePath(); mctx.fill(); mctx.stroke()
-  })
-
-  // Union of every row (all its segments) that contains at least one pin —
-  // uses the shared, bug-fixed findPinRow so highlighting and the printed
-  // row label always agree with each other.
-  const highlightIdx = new Set()
-  const rowLabels = items.map(o => {
-    const info = findPinRow(mapData, o.pin)
-    if (info) info.rowInsertIdxs.forEach(idx => highlightIdx.add(idx))
-    return info ? info.label : null
   })
 
   mapData.inserts.forEach((ins, idx) => {
@@ -107,6 +122,11 @@ export default function App() {
   // sama Vite-projekti, sama Netlify-deploy, ei erillistä sivustoa.
   if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('asentaja')) {
     return <InstallerView />
+  }
+  // ?valvomo avaa työnjohtajan työpöytänäkymän — kuka korjaa mitä, mikä on
+  // avoinna, mikä korjattu. Sama periaate kuin ?asentaja.
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('valvomo')) {
+    return <Dashboard />
   }
 
   const [site, setSite] = useState('Isoneva, Suonenjoki')
@@ -501,12 +521,12 @@ export default function App() {
           : g.items.some(o => o.sev === 'Huomio') ? 'Huomio' : 'Info'
         const col = sevCol[worstSev] || [80, 80, 80]
         doc.setFillColor(...col)
-        doc.roundedRect(M, y, CW, 7, 1.5, 1.5, 'F')
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(255, 255, 255)
-        doc.text(`${gi + 1}.  ${catLabel}`, M + 4, y + 5)
+        doc.roundedRect(M, y, CW, 8, 1.5, 1.5, 'F')
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255, 255, 255)
+        doc.text(`${gi + 1}.  ${catLabel}`, M + 4, y + 5.7)
         const countLabel = lang === 'en' ? `${g.items.length} item${g.items.length === 1 ? '' : 's'}` : `${g.items.length} kpl`
-        doc.text(countLabel, W - M - 4, y + 5, { align: 'right' })
-        y += 10
+        doc.text(countLabel, W - M - 4, y + 5.7, { align: 'right' })
+        y += 11
 
         // One combined map for every pin in this category, numbered to match
         // the list below.
@@ -514,8 +534,8 @@ export default function App() {
         let rowLabelByItem = new Map()
         if (withPin.length && mapData) {
           if (y + 150 > 278) { doc.addPage(); y = 18 }
-          doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
-          doc.text(T.location, M + 2, y); y += 4
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(100, 100, 120)
+          doc.text(T.location, M + 2, y); y += 4.5
           try {
             const { dataUrl, outW, outH, rowLabels } = renderGroupMapImage(mapData, withPin)
             let pdfW = CW, pdfH = pdfW * (outH / outW)
@@ -536,13 +556,13 @@ export default function App() {
           const rowLbl = rowLabelByItem.get(o)
           const rowStr = rowLbl ? `  (${T.row} ${rowLbl})` : ''
           const timeStr = o.createdAt ? '  ' + new Date(o.createdAt).toLocaleTimeString(T.dateLocale, { hour: '2-digit', minute: '2-digit' }) : ''
-          doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...sc)
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sc)
           doc.text(`${idx + 1}. ${sevLabel}${rowStr}${timeStr}`, M + 2, y)
-          y += 5
+          y += 5.5
           if (o.note) {
-            doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(60, 60, 60)
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(60, 60, 60)
             const lines = doc.splitTextToSize(o.note, CW - 6)
-            doc.text(lines, M + 6, y); y += lines.length * 4.5 + 2
+            doc.text(lines, M + 6, y); y += lines.length * 5 + 2
           }
         })
         y += 2
@@ -590,28 +610,28 @@ export default function App() {
       const lbl = o.cat === 'Muu asia' && o.muu ? `${T.other} – ${o.muu}` : catLabel
       const col = sevCol[o.sev] || [80, 80, 80]
       doc.setFillColor(...col)
-      doc.roundedRect(M, y, CW, 7, 1.5, 1.5, 'F')
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(255, 255, 255)
-      doc.text(`${i + 1}.  ${lbl}`, M + 4, y + 5)
-      doc.text(sevLabel, W - M - 4, y + 5, { align: 'right' })
-      y += 10
+      doc.roundedRect(M, y, CW, 8, 1.5, 1.5, 'F')
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255, 255, 255)
+      doc.text(`${i + 1}.  ${lbl}`, M + 4, y + 5.7)
+      doc.text(sevLabel, W - M - 4, y + 5.7, { align: 'right' })
+      y += 11
 
       if (o.createdAt) {
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140)
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(140, 140, 140)
         doc.text(new Date(o.createdAt).toLocaleTimeString(T.dateLocale, { hour: '2-digit', minute: '2-digit' }), M + 2, y)
-        y += 4
+        y += 4.5
       }
 
       if (o.note) {
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(40, 40, 40)
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(40, 40, 40)
         const lines = doc.splitTextToSize(o.note, CW - 4)
-        doc.text(lines, M + 2, y); y += lines.length * 5 + 3
+        doc.text(lines, M + 2, y); y += lines.length * 5.5 + 3
       }
 
       // Map thumbnail - uses the zoom level left on screen, centered on the pin, pin's row highlighted in red
       if (o.pin && mapData) {
         if (y + 150 > 278) { doc.addPage(); y = 18 }
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(100, 100, 120)
         // Uses the shared findPinRow (shared.js), which groups all insert
         // segments at the same height into one logical row and restricts
         // the label search to that same row band — fixes the earlier bug

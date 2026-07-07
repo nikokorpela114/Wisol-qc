@@ -1,13 +1,13 @@
 // src/InstallerView.jsx
-import React, { useState, useEffect, useRef } from 'react'
-import MapView from './MapView.jsx'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
-import { KNOWN_SITES, findPinRow, CAT_EN, SEV_EN } from './shared.js'
-import { subscribeToPush, sendPushNotification, getPushStatus } from './push.js'
+import { KNOWN_SITES, findPinRow, renderPinMapThumb, CAT_EN, SEV_EN } from './shared.js'
+import { subscribeToPush, sendPushNotification } from './push.js'
 
 const SESSION_KEY = 'wisol_installer_session'
+const FIXED_BATCH_KEY_PREFIX = 'wisol_installer_fixed_batch_' // + installer id
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
 const sevColor = { Kriittinen: '#b02828', Huomio: '#a06800', Info: '#1a7a45' }
 
@@ -24,6 +24,8 @@ export default function InstallerView() {
   const [mapData, setMapData] = useState(null)
   const [gpsCoords, setGpsCoords] = useState(null)
   const [pushMsg, setPushMsg] = useState('')
+  const [fixedBatch, setFixedBatch] = useState([]) // korjatut mutta ei vielä kuitatut asentajan istunnossa
+  const [confirmMsg, setConfirmMsg] = useState('')
 
   const t = key => {
     const dict = {
@@ -40,6 +42,8 @@ export default function InstallerView() {
       notifOn: { fi: '🔔 Salli ilmoitukset', en: '🔔 Enable notifications' },
       notifOnDone: { fi: '🔔 Ilmoitukset päällä', en: '🔔 Notifications on' },
       row: { fi: 'rivi', en: 'row' },
+      confirmBatch: { fi: 'Kuittaa työnjohtajalle', en: 'Confirm to supervisor' },
+      fixedCount: { fi: 'korjattu, ei vielä lähetetty', en: 'fixed, not sent yet' },
     }
     return dict[key]?.[lang] ?? key
   }
@@ -51,6 +55,30 @@ export default function InstallerView() {
       if (raw) setSession(JSON.parse(raw))
     } catch {}
   }, [])
+
+  // Palauta kesken jäänyt "korjattu mutta ei vielä kuitattu" -lista, jos
+  // sovellus suljettiin (esim. puhelin lukittui taskussa) ennen kuin
+  // asentaja ehti painaa koontikuittausta. Ilman tätä lista nollaantuisi
+  // hiljaa ja työnjohtaja jäisi kokonaan ilman ilmoitusta niistä korjauksista
+  // — itse korjausmerkinnät ovat toki jo tallessa Supabasessa, mutta
+  // ilmoitus jäisi silti lähettämättä.
+  useEffect(() => {
+    if (!session) return
+    try {
+      const raw = localStorage.getItem(FIXED_BATCH_KEY_PREFIX + session.id)
+      if (raw) setFixedBatch(JSON.parse(raw))
+    } catch {}
+  }, [session])
+
+  // Tallenna lista joka kerta kun se muuttuu, jotta sovelluksen sulkeminen
+  // (vahingossa tai tarkoituksella) ei koskaan hukkaa kertyneitä korjauksia.
+  useEffect(() => {
+    if (!session) return
+    try {
+      if (fixedBatch.length > 0) localStorage.setItem(FIXED_BATCH_KEY_PREFIX + session.id, JSON.stringify(fixedBatch))
+      else localStorage.removeItem(FIXED_BATCH_KEY_PREFIX + session.id)
+    } catch {}
+  }, [fixedBatch, session])
 
   // Load installer list for the login picker
   useEffect(() => {
@@ -93,12 +121,21 @@ export default function InstallerView() {
   }
   useEffect(() => { loadTasks() }, [session])
 
-  // Näytä "Ilmoitukset päällä" heti jos tilaus on jo aktiivinen — ei aina
-  // oletustekstiä vaikka olisi jo tilattu aiemmalla käyntikerralla.
-  useEffect(() => {
-    if (!session) return
-    getPushStatus().then(on => { if (on) setPushMsg(t('notifOnDone')) })
-  }, [session])
+  // Pre-render a small STATIC map snapshot per task (once, memoized) instead
+  // of mounting a full interactive <MapView> for every open task. With many
+  // open tasks this used to mount that many live SVG maps with touch/mouse
+  // listeners at once, which was heavy enough to crash mobile Safari
+  // ("Toistuva ongelma verkkosivulla"). Only recomputes when the task list
+  // or the map data actually changes.
+  const thumbById = useMemo(() => {
+    const map = new Map()
+    if (!mapData || !tasks) return map
+    tasks.forEach(o => {
+      if (o.pin_x == null) return
+      try { map.set(o.id, renderPinMapThumb(mapData, { x: o.pin_x, y: o.pin_y })) } catch (e) { console.error('thumb render failed:', e) }
+    })
+    return map
+  }, [mapData, tasks])
 
   // Figure out which site's map to show — first distinct site among open tasks
   useEffect(() => {
@@ -136,15 +173,36 @@ export default function InstallerView() {
     setPushMsg(res.ok ? t('notifOnDone') : (res.reason || 'Ei onnistunut'))
   }
 
+  // Merkitsee havainnon korjatuksi HETI Supabaseen (data ei häviä vaikka
+  // sovellus suljettaisiin), mutta EI lähetä ilmoitusta työnjohtajalle vielä
+  // — jos asentaja korjaa esim. 40 vikaa peräkkäin, työnjohtaja ei halua 40
+  // erillistä ilmoitusta. Sen sijaan korjaukset kertyvät `fixedBatch`-listaan,
+  // ja asentaja lähettää yhden koontikuittauksen alapalkin napista kun on
+  // valmis (ks. confirmBatch).
   async function markFixed(o) {
     await sb.from('observations').update({ status: 'korjattu', fixed_at: new Date().toISOString() }).eq('id', o.id)
     setTasks(prev => prev.filter(x => x.id !== o.id))
-    sendPushNotification({
+    setFixedBatch(prev => [...prev, { cat: o.cat, site: o.site, reportBatch: o.report_batch }])
+  }
+
+  async function confirmBatch() {
+    if (fixedBatch.length === 0) return
+    const n = fixedBatch.length
+    const cats = [...new Set(fixedBatch.map(f => f.cat))]
+    const catSummary = cats.length <= 2 ? cats.join(', ') : `${cats.length} eri vikatyyppiä`
+    const site = fixedBatch[0]?.site || ''
+    setConfirmMsg(lang === 'en' ? 'Sending…' : 'Lähetetään…')
+    const res = await sendPushNotification({
       role: 'supervisor',
-      title: `${session.name} korjasi havainnon`,
-      body: `${o.cat} — ${o.site}`,
-      tag: o.report_batch || undefined,
+      title: lang === 'en'
+        ? `${session.name} fixed ${n} item${n === 1 ? '' : 's'}`
+        : `${session.name} korjasi ${n} havainto${n === 1 ? 'n' : 'a'}`,
+      body: `${catSummary} — ${site}`,
+      tag: fixedBatch[0]?.reportBatch || undefined,
     })
+    setFixedBatch([])
+    setConfirmMsg(res?.sent > 0 ? '✓ ' + (lang === 'en' ? 'Sent' : 'Lähetetty') : '✓ ' + (lang === 'en' ? 'Saved' : 'Tallennettu'))
+    setTimeout(() => setConfirmMsg(''), 4000)
   }
 
   // --- Login screen ---
@@ -217,13 +275,15 @@ export default function InstallerView() {
 
               {mapData && o.pin_x != null && (
                 <div style={{ padding: 12 }}>
-                  <MapView
-                    mapData={mapData}
-                    pin={{ x: o.pin_x, y: o.pin_y }}
-                    onPin={() => {}}
-                    gpsCoords={gpsCoords}
-                    onViewChange={() => {}}
-                  />
+                  {thumbById.has(o.id) ? (
+                    <img
+                      src={thumbById.get(o.id)}
+                      alt=""
+                      style={{ width: '100%', display: 'block', borderRadius: 8, border: '1px solid #d0d5e8' }}
+                    />
+                  ) : (
+                    <div style={{ height: 160, background: '#eef4ec', borderRadius: 8 }} />
+                  )}
                   {rowInfo && (
                     <div style={{ marginTop: 4, fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
                       📍 {t('row')}: {rowInfo.label}
@@ -241,6 +301,18 @@ export default function InstallerView() {
           )
         })}
       </div>
+
+      {/* Koontipalkki: korjaukset kertyvät tähän ilman että jokaisesta lähtee
+          oma ilmoitus — asentaja kuittaa kaikki kerralla yhdellä napilla, ja
+          työnjohtaja saa yhden koonti-ilmoituksen monen sijaan. */}
+      {fixedBatch.length > 0 && (
+        <div style={{ position: 'sticky', bottom: 0, left: 0, right: 0, padding: '10px 12px calc(10px + env(safe-area-inset-bottom, 0px))', background: 'rgba(244,246,251,0.97)', borderTop: '1px solid #d0d5e8', backdropFilter: 'blur(4px)' }}>
+          <button onClick={confirmBatch} style={{ width: '100%', padding: 13, background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            📬 {fixedBatch.length} {t('fixedCount')} — {t('confirmBatch')}
+          </button>
+          {confirmMsg && <div style={{ textAlign: 'center', fontSize: 12, color: '#1a8a50', fontWeight: 600, marginTop: 6 }}>{confirmMsg}</div>}
+        </div>
+      )}
     </div>
   )
 }
