@@ -42,10 +42,13 @@ function renderGroupMapImage(mapData, items) {
   // ends up spanning many rows' worth of space — the crop zooms out far
   // more than intended, and a single long highlighted row just runs off
   // both edges of the image with no clear sense of where the fault is.
-  // ~9m horizontal / ~7m vertical gives roughly 1–2 table-lengths of
-  // context around the pin(s), consistently, on any site.
-  const padX = Math.max(9 * sxm, (maxX - minX) * 0.15)
-  const padY = Math.max(7 * sym, (maxY - minY) * 0.15)
+  // ~22m horizontal / ~11m vertical is enough to usually show at least one
+  // full table's edges (a table is ~25m long) plus a sliver of its
+  // neighbours, and a couple of rows above/below — enough visual context to
+  // tell where along the row the fault sits, instead of a solid colour
+  // block filling the whole frame with no reference points.
+  const padX = Math.max(22 * sxm, (maxX - minX) * 0.15)
+  const padY = Math.max(11 * sym, (maxY - minY) * 0.15)
   const svgX0 = Math.max(0, minX - padX)
   const svgY0 = Math.max(0, minY - padY)
   const svgX1 = Math.min(mapData.W, maxX + padX)
