@@ -72,15 +72,35 @@ export function findPinRow(mapData, pin) {
   const hit = mapData.inserts[hitIdx]
 
   // 2. Kerää looginen rivi = lohkot samalla Y-korkeudella JA X-suunnassa
-  //    peräkkäin (ei isoja aukkoja välissä). Pelkkä Y-korkeus ei riitä: jos
-  //    rivi katkeaa esim. tien (Road 03) kohdalla, tien toisella puolella
-  //    oleva lohko voi sattua olemaan täsmälleen samalla korkeudella mutta
-  //    kuulua ihan eri, kauempana olevaan riviin/numerointiin. Siksi
-  //    ketjutetaan lähtien pinnin lohkosta vain niin kauas kuin peräkkäisten
-  //    lohkojen väli pysyy pienenä (tavallinen pöytien välinen rako) —
-  //    ison aukon (esim. tie) kohdalla ketju katkeaa.
+  //    peräkkäin. Pelkkä Y-korkeus ei riitä: jos rivi katkeaa esim. tien
+  //    (Road 03/04) kohdalla, tien toisella puolella oleva lohko voi sattua
+  //    olemaan täsmälleen samalla korkeudella mutta kuulua ihan eri,
+  //    kauempana olevaan riviin/numerointiin. Ketjutetaan lähtien pinnin
+  //    lohkosta naapureihin, ja ketju katkeaa jos:
+  //    (a) väli on epätavallisen suuri (paljon isompi kuin tavallinen
+  //        pöytien välinen rako), TAI
+  //    (b) tien viiva (mapData.roads) kulkee kahden peräkkäisen lohkon
+  //        välistä — tämä on tarkempi tapa tunnistaa nimenomaan tien
+  //        ylitys erotuksena tavallisesta, isommastakin pöytävälistä
+  //        (esim. huoltokäytävä rivin sisällä).
   const yTol = th * 0.6
-  const gapTol = 8 * sxm // n. 8 metrin rako on jo epätavallisen iso tavalliseksi pöytien väliseksi raoksi — isompi aukko = eri lohko/toisella puolen tietä
+  const gapTol = 25 * sxm // reilusti isompi kuin tavallinen pöytäväli, jotta rivin sisäiset huoltokäytävät ym. eivät katkaise ketjua turhaan
+  const rowY = hit.y + th / 2
+  const roadCrosses = (xA, xB) => {
+    const lo = Math.min(xA, xB), hi = Math.max(xA, xB)
+    return mapData.roads.some(pts => {
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [x1, y1] = pts[i], [x2, y2] = pts[i + 1]
+        if ((y1 - rowY) * (y2 - rowY) > 0) continue // segmentti ei ylitä rivin Y-tasoa
+        if (y1 === y2) continue
+        const t = (rowY - y1) / (y2 - y1)
+        const cx = x1 + t * (x2 - x1)
+        if (cx >= lo && cx <= hi) return true
+      }
+      return false
+    })
+  }
+
   const sameY = mapData.inserts
     .map((ins, idx) => ({ idx, ins, left: ins.x, right: ins.x + ins.panels * PANEL_W_M * sxm }))
     .filter(e => Math.abs(e.ins.y - hit.y) <= yTol)
@@ -89,11 +109,13 @@ export function findPinRow(mapData, pin) {
   const hitPos = sameY.findIndex(e => e.idx === hitIdx)
   const chain = [sameY[hitPos]]
   for (let i = hitPos - 1; i >= 0; i--) {
-    if (sameY[i].right >= chain[0].left - gapTol) chain.unshift(sameY[i])
+    const edge = chain[0].left
+    if (sameY[i].right >= edge - gapTol && !roadCrosses(sameY[i].right, edge)) chain.unshift(sameY[i])
     else break
   }
   for (let i = hitPos + 1; i < sameY.length; i++) {
-    if (sameY[i].left <= chain[chain.length - 1].right + gapTol) chain.push(sameY[i])
+    const edge = chain[chain.length - 1].right
+    if (sameY[i].left <= edge + gapTol && !roadCrosses(edge, sameY[i].left)) chain.push(sameY[i])
     else break
   }
 
