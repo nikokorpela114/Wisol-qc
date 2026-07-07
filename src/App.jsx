@@ -4,6 +4,7 @@ import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
 import InstallerView from './InstallerView.jsx'
+import Dashboard from './Dashboard.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
 import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow } from './shared.js'
 
@@ -121,6 +122,11 @@ export default function App() {
   // sama Vite-projekti, sama Netlify-deploy, ei erillistä sivustoa.
   if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('asentaja')) {
     return <InstallerView />
+  }
+  // ?valvomo avaa työnjohtajan työpöytänäkymän — kuka korjaa mitä, mikä on
+  // avoinna, mikä korjattu. Sama periaate kuin ?asentaja.
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('valvomo')) {
+    return <Dashboard />
   }
 
   const [site, setSite] = useState('Isoneva, Suonenjoki')
