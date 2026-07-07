@@ -31,24 +31,38 @@ function renderGroupMapImage(mapData, items) {
 
   const pins = items.map(o => ({ x: o.pin.x * mapData.W, y: o.pin.y * mapData.H }))
 
+  // Find each pin's full row (using the shared, bug-fixed findPinRow) once,
+  // and reuse it both for highlighting and for sizing the crop.
+  const rowInfos = items.map(o => findPinRow(mapData, o.pin))
+  const highlightIdx = new Set()
+  const rowLabels = rowInfos.map(info => {
+    if (info) info.rowInsertIdxs.forEach(idx => highlightIdx.add(idx))
+    return info ? info.label : null
+  })
+
   let minX = Math.min(...pins.map(p => p.x)), maxX = Math.max(...pins.map(p => p.x))
   let minY = Math.min(...pins.map(p => p.y)), maxY = Math.max(...pins.map(p => p.y))
 
-  // Padding is defined in real-world METERS (converted to SVG units via
-  // sxm/sym), not a fixed number of SVG units. A fixed SVG-unit padding
-  // doesn't work across sites: the whole DXF is always scaled to the same
-  // ~1000-unit canvas regardless of how many rows the site actually has, so
-  // on a large site with many short rows a "generous-looking" fixed padding
-  // ends up spanning many rows' worth of space — the crop zooms out far
-  // more than intended, and a single long highlighted row just runs off
-  // both edges of the image with no clear sense of where the fault is.
-  // ~22m horizontal / ~11m vertical is enough to usually show at least one
-  // full table's edges (a table is ~25m long) plus a sliver of its
-  // neighbours, and a couple of rows above/below — enough visual context to
-  // tell where along the row the fault sits, instead of a solid colour
-  // block filling the whole frame with no reference points.
-  const padX = Math.max(22 * sxm, (maxX - minX) * 0.15)
-  const padY = Math.max(11 * sym, (maxY - minY) * 0.15)
+  // Expand the bounding box to cover each pin's ENTIRE row — every segment
+  // of the chain findPinRow found, not just a fixed radius around the pin
+  // point. A "zoomed enough to see the pin clearly" crop showed only one
+  // anonymous colour block with no row number and no sense of where along
+  // a long row it sat. Showing the whole row (segments + its number label)
+  // instead always gives that context, at the cost of a wider image when
+  // the row itself is long — which is the correct trade-off here.
+  highlightIdx.forEach(idx => {
+    const ins = mapData.inserts[idx]
+    const left = ins.x, right = ins.x + ins.panels * PANEL_W_M * sxm
+    if (left < minX) minX = left
+    if (right > maxX) maxX = right
+    if (ins.y < minY) minY = ins.y
+    if (ins.y + th > maxY) maxY = ins.y + th
+  })
+
+  // Small, mostly fixed margin now — the crop width is already driven by
+  // the row's real extent, not by guesswork padding.
+  const padX = Math.max(6 * sxm, (maxX - minX) * 0.05)
+  const padY = Math.max(9 * sym, (maxY - minY) * 0.2)
   const svgX0 = Math.max(0, minX - padX)
   const svgY0 = Math.max(0, minY - padY)
   const svgX1 = Math.min(mapData.W, maxX + padX)
@@ -67,16 +81,6 @@ function renderGroupMapImage(mapData, items) {
   mapData.pvAreas.forEach(pts => {
     mctx.beginPath(); pts.forEach(([x, y2], i) => i === 0 ? mctx.moveTo(px(x), py(y2)) : mctx.lineTo(px(x), py(y2)))
     mctx.closePath(); mctx.fill(); mctx.stroke()
-  })
-
-  // Union of every row (all its segments) that contains at least one pin —
-  // uses the shared, bug-fixed findPinRow so highlighting and the printed
-  // row label always agree with each other.
-  const highlightIdx = new Set()
-  const rowLabels = items.map(o => {
-    const info = findPinRow(mapData, o.pin)
-    if (info) info.rowInsertIdxs.forEach(idx => highlightIdx.add(idx))
-    return info ? info.label : null
   })
 
   mapData.inserts.forEach((ins, idx) => {
