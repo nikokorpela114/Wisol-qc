@@ -71,17 +71,34 @@ export function findPinRow(mapData, pin) {
   if (hitIdx < 0) return null
   const hit = mapData.inserts[hitIdx]
 
-  // 2. Kerää kaikki insertit jotka ovat samalla Y-korkeudella (sama looginen rivi).
-  //    Toleranssi puolet pöydän syvyydestä — sama rivi ei yleensä poikkea tätä enempää.
+  // 2. Kerää looginen rivi = lohkot samalla Y-korkeudella JA X-suunnassa
+  //    peräkkäin (ei isoja aukkoja välissä). Pelkkä Y-korkeus ei riitä: jos
+  //    rivi katkeaa esim. tien (Road 03) kohdalla, tien toisella puolella
+  //    oleva lohko voi sattua olemaan täsmälleen samalla korkeudella mutta
+  //    kuulua ihan eri, kauempana olevaan riviin/numerointiin. Siksi
+  //    ketjutetaan lähtien pinnin lohkosta vain niin kauas kuin peräkkäisten
+  //    lohkojen väli pysyy pienenä (tavallinen pöytien välinen rako) —
+  //    ison aukon (esim. tie) kohdalla ketju katkeaa.
   const yTol = th * 0.6
-  const rowInserts = mapData.inserts.filter(ins => Math.abs(ins.y - hit.y) <= yTol)
+  const gapTol = 8 * sxm // n. 8 metrin rako on jo epätavallisen iso tavalliseksi pöytien väliseksi raoksi — isompi aukko = eri lohko/toisella puolen tietä
+  const sameY = mapData.inserts
+    .map((ins, idx) => ({ idx, ins, left: ins.x, right: ins.x + ins.panels * PANEL_W_M * sxm }))
+    .filter(e => Math.abs(e.ins.y - hit.y) <= yTol)
+    .sort((a, b) => a.left - b.left)
 
-  // 3. Koko rivin oikea reuna = suurin (ins.x + leveys) kaikista saman rivin lohkoista
-  let rowRightX = -Infinity
-  rowInserts.forEach(ins => {
-    const right = ins.x + ins.panels * PANEL_W_M * sxm
-    if (right > rowRightX) rowRightX = right
-  })
+  const hitPos = sameY.findIndex(e => e.idx === hitIdx)
+  const chain = [sameY[hitPos]]
+  for (let i = hitPos - 1; i >= 0; i--) {
+    if (sameY[i].right >= chain[0].left - gapTol) chain.unshift(sameY[i])
+    else break
+  }
+  for (let i = hitPos + 1; i < sameY.length; i++) {
+    if (sameY[i].left <= chain[chain.length - 1].right + gapTol) chain.push(sameY[i])
+    else break
+  }
+
+  // 3. Rivin oma oikea reuna = suurin (ins.x + leveys) vain ketjuun kuuluvista lohkoista
+  const rowRightX = Math.max(...chain.map(e => e.right))
   const targetX = rowRightX
   const targetY = hit.y + th / 2
 
@@ -96,14 +113,11 @@ export function findPinRow(mapData, pin) {
   })
   if (!label || best > maxLabelDist) return null
 
-  // Palautetaan myös koko rivin kaikkien lohkojen indeksit — näitä tarvitaan
+  // Palautetaan myös koko rivin (ketjun) lohkojen indeksit — näitä tarvitaan
   // kun halutaan korostaa/rajata koko rivi eikä vain sitä yhtä lohkoa johon
   // pinni sattui osumaan (esim. PDF:n karttakuvassa ja usean pinnin
   // yhteiskartassa).
-  const rowInsertIdxs = []
-  mapData.inserts.forEach((ins, idx) => {
-    if (Math.abs(ins.y - hit.y) <= yTol) rowInsertIdxs.push(idx)
-  })
+  const rowInsertIdxs = chain.map(e => e.idx)
 
   return { rowIdx: hitIdx, label, rowInsertIdxs }
 }
