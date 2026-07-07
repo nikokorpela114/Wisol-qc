@@ -1,11 +1,10 @@
 // src/InstallerView.jsx
-import React, { useState, useEffect, useRef } from 'react'
-import MapView from './MapView.jsx'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
-import { KNOWN_SITES, findPinRow, CAT_EN, SEV_EN } from './shared.js'
-import { subscribeToPush, sendPushNotification, getPushStatus } from './push.js'
+import { KNOWN_SITES, findPinRow, renderPinMapThumb, CAT_EN, SEV_EN } from './shared.js'
+import { subscribeToPush, sendPushNotification } from './push.js'
 
 const SESSION_KEY = 'wisol_installer_session'
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
@@ -93,12 +92,21 @@ export default function InstallerView() {
   }
   useEffect(() => { loadTasks() }, [session])
 
-  // Näytä "Ilmoitukset päällä" heti jos tilaus on jo aktiivinen — ei aina
-  // oletustekstiä vaikka olisi jo tilattu aiemmalla käyntikerralla.
-  useEffect(() => {
-    if (!session) return
-    getPushStatus().then(on => { if (on) setPushMsg(t('notifOnDone')) })
-  }, [session])
+  // Pre-render a small STATIC map snapshot per task (once, memoized) instead
+  // of mounting a full interactive <MapView> for every open task. With many
+  // open tasks this used to mount that many live SVG maps with touch/mouse
+  // listeners at once, which was heavy enough to crash mobile Safari
+  // ("Toistuva ongelma verkkosivulla"). Only recomputes when the task list
+  // or the map data actually changes.
+  const thumbById = useMemo(() => {
+    const map = new Map()
+    if (!mapData || !tasks) return map
+    tasks.forEach(o => {
+      if (o.pin_x == null) return
+      try { map.set(o.id, renderPinMapThumb(mapData, { x: o.pin_x, y: o.pin_y })) } catch (e) { console.error('thumb render failed:', e) }
+    })
+    return map
+  }, [mapData, tasks])
 
   // Figure out which site's map to show — first distinct site among open tasks
   useEffect(() => {
@@ -217,13 +225,15 @@ export default function InstallerView() {
 
               {mapData && o.pin_x != null && (
                 <div style={{ padding: 12 }}>
-                  <MapView
-                    mapData={mapData}
-                    pin={{ x: o.pin_x, y: o.pin_y }}
-                    onPin={() => {}}
-                    gpsCoords={gpsCoords}
-                    onViewChange={() => {}}
-                  />
+                  {thumbById.has(o.id) ? (
+                    <img
+                      src={thumbById.get(o.id)}
+                      alt=""
+                      style={{ width: '100%', display: 'block', borderRadius: 8, border: '1px solid #d0d5e8' }}
+                    />
+                  ) : (
+                    <div style={{ height: 160, background: '#eef4ec', borderRadius: 8 }} />
+                  )}
                   {rowInfo && (
                     <div style={{ marginTop: 4, fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
                       📍 {t('row')}: {rowInfo.label}

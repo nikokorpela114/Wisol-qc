@@ -107,3 +107,72 @@ export function findPinRow(mapData, pin) {
 
   return { rowIdx: hitIdx, label, rowInsertIdxs }
 }
+
+// Renders a small, STATIC (non-interactive) map snapshot cropped around a
+// single pin, as a JPEG data URL. Used by InstallerView instead of the full
+// interactive <MapView> component for each task in the list — with many
+// open tasks (dozens), mounting one full interactive SVG map (touch/mouse
+// handlers, full DXF geometry) per task was heavy enough to crash mobile
+// Safari ("Toistuva ongelma verkkosivulla"). A plain <img> from a cached
+// canvas snapshot is dramatically cheaper: no event listeners, no live SVG
+// DOM per task, and it can be computed once and memoized.
+export function renderPinMapThumb(mapData, pin, outW = 700) {
+  const sxm = mapData.W / (mapData.maxX - mapData.minX)
+  const sym = mapData.H / (mapData.maxY - mapData.minY)
+  const th = TABLE_DEPTH_M * sym
+
+  const psx = pin.x * mapData.W, psy = pin.y * mapData.H
+  const info = findPinRow(mapData, pin)
+
+  // Crop tightly around the pin — a handful of row-depths in each
+  // direction is enough context without dragging in the whole site.
+  const pad = th * 3.5
+  const svgX0 = Math.max(0, psx - pad * 1.8), svgX1 = Math.min(mapData.W, psx + pad * 1.8)
+  const svgY0 = Math.max(0, psy - pad), svgY1 = Math.min(mapData.H, psy + pad)
+  const svgCropW = Math.max(1, svgX1 - svgX0), svgCropH = Math.max(1, svgY1 - svgY0)
+
+  const outH = Math.round(outW * svgCropH / svgCropW)
+  const canvas = document.createElement('canvas')
+  canvas.width = outW; canvas.height = outH
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = '#eef4ec'; ctx.fillRect(0, 0, outW, outH)
+  const kx = outW / svgCropW, ky = outH / svgCropH
+  const px = sx => (sx - svgX0) * kx, py = sy => (sy - svgY0) * ky
+
+  ctx.fillStyle = 'rgba(200,223,245,0.85)'; ctx.strokeStyle = '#4a90d9'; ctx.lineWidth = 1
+  mapData.pvAreas.forEach(pts => {
+    ctx.beginPath(); pts.forEach(([x, y], i) => i === 0 ? ctx.moveTo(px(x), py(y)) : ctx.lineTo(px(x), py(y)))
+    ctx.closePath(); ctx.fill(); ctx.stroke()
+  })
+
+  const highlightIdx = new Set(info ? info.rowInsertIdxs : [])
+  mapData.inserts.forEach((ins, idx) => {
+    const right = ins.x + ins.panels * PANEL_W_M * sxm
+    const left = ins.x
+    if (right < svgX0 || left > svgX1 || ins.y + th < svgY0 || ins.y > svgY1) return // skip off-screen tables
+    const tw = ins.panels * PANEL_W_M * sxm * kx, thpx = TABLE_DEPTH_M * sym * ky
+    const isHi = highlightIdx.has(idx)
+    ctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
+    ctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
+    ctx.lineWidth = isHi ? 1.4 : 0.5
+    ctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
+    ctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
+  })
+
+  ctx.textAlign = 'center'
+  mapData.rowNumbers.forEach(t => {
+    if (t.x < svgX0 || t.x > svgX1 || t.y < svgY0 || t.y > svgY1) return
+    ctx.font = 'bold 12px sans-serif'
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'
+    ctx.fillRect(px(t.x) - 9, py(t.y) - 8, 18, 11)
+    ctx.fillStyle = '#0d1a6e'
+    ctx.fillText(t.text, px(t.x), py(t.y) + 1)
+  })
+
+  const cx = px(psx), cy = py(psy)
+  ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2)
+  ctx.fillStyle = '#d63030'; ctx.fill()
+  ctx.strokeStyle = 'white'; ctx.lineWidth = 2.5; ctx.stroke()
+
+  return canvas.toDataURL('image/jpeg', 0.85)
+}
