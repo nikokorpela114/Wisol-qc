@@ -159,12 +159,27 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
 
   const psx = pin.x * mapData.W, psy = pin.y * mapData.H
   const info = findPinRow(mapData, pin)
+  const highlightIdx = new Set(info ? info.rowInsertIdxs : [])
 
-  // Crop tightly around the pin — a handful of row-depths in each
-  // direction is enough context without dragging in the whole site.
-  const pad = th * 3.5
-  const svgX0 = Math.max(0, psx - pad * 1.8), svgX1 = Math.min(mapData.W, psx + pad * 1.8)
-  const svgY0 = Math.max(0, psy - pad), svgY1 = Math.min(mapData.H, psy + pad)
+  // Crop around the pin's ENTIRE detected row (every segment of it), not
+  // just a fixed radius around the pin point — a tight radius-only crop
+  // showed a single anonymous colour block with no row number and no way
+  // to tell where along a long row the pin actually sat. Showing the whole
+  // row (plus its number label) instead always gives that context.
+  let minX = psx, maxX = psx, minY = psy, maxY = psy
+  highlightIdx.forEach(idx => {
+    const ins = mapData.inserts[idx]
+    const left = ins.x, right = ins.x + ins.panels * PANEL_W_M * sxm
+    if (left < minX) minX = left
+    if (right > maxX) maxX = right
+    if (ins.y < minY) minY = ins.y
+    if (ins.y + th > maxY) maxY = ins.y + th
+  })
+
+  const padX = Math.max(6 * sxm, (maxX - minX) * 0.05)
+  const padY = Math.max(9 * sym, (maxY - minY) * 0.2)
+  const svgX0 = Math.max(0, minX - padX), svgX1 = Math.min(mapData.W, maxX + padX)
+  const svgY0 = Math.max(0, minY - padY), svgY1 = Math.min(mapData.H, maxY + padY)
   const svgCropW = Math.max(1, svgX1 - svgX0), svgCropH = Math.max(1, svgY1 - svgY0)
 
   const outH = Math.round(outW * svgCropH / svgCropW)
@@ -181,7 +196,6 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
     ctx.closePath(); ctx.fill(); ctx.stroke()
   })
 
-  const highlightIdx = new Set(info ? info.rowInsertIdxs : [])
   mapData.inserts.forEach((ins, idx) => {
     const right = ins.x + ins.panels * PANEL_W_M * sxm
     const left = ins.x
