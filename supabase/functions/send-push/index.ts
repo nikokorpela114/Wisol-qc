@@ -25,13 +25,28 @@ webpush.setVapidDetails(
   Deno.env.get('VAPID_PRIVATE_KEY')!
 )
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
 Deno.serve(async (req) => {
-  if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
+  // Selain lähettää automaattisesti OPTIONS-esitarkistuksen ennen POSTia
+  // kun pyynnössä on custom-otsikoita (Authorization, Content-Type). Jos
+  // tähän ei vastata oikein, selain ei koskaan lähetä itse POST-pyyntöä —
+  // tämä oli koko ongelman todellinen syy.
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+  if (req.method !== 'POST') {
+    return new Response('Method not allowed', { status: 405, headers: corsHeaders })
+  }
 
   try {
     const { role, installer_id, title, body, url, tag } = await req.json()
     if (!role || !title) {
-      return new Response(JSON.stringify({ error: 'role ja title vaaditaan' }), { status: 400 })
+      return new Response(JSON.stringify({ error: 'role ja title vaaditaan' }), { status: 400, headers: corsHeaders })
     }
 
     let query = supabase.from('push_subscriptions').select('id, subscription').eq('role', role)
@@ -54,11 +69,12 @@ Deno.serve(async (req) => {
     if (toDelete.length) await supabase.from('push_subscriptions').delete().in('id', toDelete)
 
     const sent = results.filter(r => r.status === 'fulfilled').length
+    console.log(`send-push: role=${role} installer_id=${installer_id || '-'} sent=${sent}/${results.length}`)
     return new Response(JSON.stringify({ sent, total: results.length }), {
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   } catch (e) {
     console.error(e)
-    return new Response(JSON.stringify({ error: String(e) }), { status: 500 })
+    return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: corsHeaders })
   }
 })
