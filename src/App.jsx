@@ -4,7 +4,7 @@ import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
 import InstallerView from './InstallerView.jsx'
-import { subscribeToPush, sendPushNotification, getPushStatus } from './push.js'
+import { subscribeToPush, sendPushNotification } from './push.js'
 import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow } from './shared.js'
 
 const CATS = [
@@ -16,6 +16,91 @@ const CATS = [
 
 let idCounter = 0
 const DRAFT_KEY = 'wisol_qc_draft_v1'
+
+// Renders one combined map image containing ALL pins from `items` (a list of
+// observations that share a fault category), so an installer can see every
+// occurrence of that fault on one picture instead of paging through a
+// separate map per observation. Crops to a bounding box that covers all the
+// pins (plus padding), highlights every row that contains at least one pin,
+// and draws each pin as a small numbered circle (1, 2, 3…) matching the
+// numbered list printed under the image in the PDF.
+function renderGroupMapImage(mapData, items) {
+  const sxm = mapData.W / (mapData.maxX - mapData.minX)
+  const sym = mapData.H / (mapData.maxY - mapData.minY)
+  const th = TABLE_DEPTH_M * sym
+
+  const pins = items.map(o => ({ x: o.pin.x * mapData.W, y: o.pin.y * mapData.H }))
+
+  let minX = Math.min(...pins.map(p => p.x)), maxX = Math.max(...pins.map(p => p.x))
+  let minY = Math.min(...pins.map(p => p.y)), maxY = Math.max(...pins.map(p => p.y))
+
+  // Padding: always at least a couple of row-depths so highlighted rows and
+  // pins near the edge of the bounding box aren't cropped off, plus a small
+  // fraction of the span itself for wide-spread groups.
+  const padX = Math.max(th * 2.5, (maxX - minX) * 0.12, 50)
+  const padY = Math.max(th * 2, (maxY - minY) * 0.12, 50)
+  const svgX0 = Math.max(0, minX - padX)
+  const svgY0 = Math.max(0, minY - padY)
+  const svgX1 = Math.min(mapData.W, maxX + padX)
+  const svgY1 = Math.min(mapData.H, maxY + padY)
+  const svgCropW = Math.max(1, svgX1 - svgX0), svgCropH = Math.max(1, svgY1 - svgY0)
+
+  const outW = 1400, outH = Math.round(outW * svgCropH / svgCropW)
+  const canvas = document.createElement('canvas')
+  canvas.width = outW; canvas.height = outH
+  const mctx = canvas.getContext('2d')
+  mctx.fillStyle = '#eef4ec'; mctx.fillRect(0, 0, outW, outH)
+  const kx = outW / svgCropW, ky = outH / svgCropH
+  const px = sx => (sx - svgX0) * kx, py = sy => (sy - svgY0) * ky
+
+  mctx.fillStyle = 'rgba(200,223,245,0.85)'; mctx.strokeStyle = '#4a90d9'; mctx.lineWidth = 1.2
+  mapData.pvAreas.forEach(pts => {
+    mctx.beginPath(); pts.forEach(([x, y2], i) => i === 0 ? mctx.moveTo(px(x), py(y2)) : mctx.lineTo(px(x), py(y2)))
+    mctx.closePath(); mctx.fill(); mctx.stroke()
+  })
+
+  // Union of every row (all its segments) that contains at least one pin —
+  // uses the shared, bug-fixed findPinRow so highlighting and the printed
+  // row label always agree with each other.
+  const highlightIdx = new Set()
+  const rowLabels = items.map(o => {
+    const info = findPinRow(mapData, o.pin)
+    if (info) info.rowInsertIdxs.forEach(idx => highlightIdx.add(idx))
+    return info ? info.label : null
+  })
+
+  mapData.inserts.forEach((ins, idx) => {
+    const tw = ins.panels * PANEL_W_M * sxm * kx
+    const thpx = TABLE_DEPTH_M * sym * ky
+    const isHi = highlightIdx.has(idx)
+    mctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
+    mctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
+    mctx.lineWidth = isHi ? 1.6 : 0.6
+    mctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
+    mctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
+  })
+
+  mctx.textAlign = 'center'
+  mapData.rowNumbers.forEach(t => {
+    mctx.font = 'bold 12px sans-serif'
+    mctx.fillStyle = 'rgba(255,255,255,0.75)'
+    mctx.fillRect(px(t.x) - 9, py(t.y) - 9, 18, 12)
+    mctx.fillStyle = '#0d1a6e'
+    mctx.fillText(t.text, px(t.x), py(t.y) + 1)
+  })
+
+  // Numbered pins — number matches the item list printed below the image.
+  pins.forEach((p, i) => {
+    const cx = px(p.x), cy = py(p.y)
+    mctx.beginPath(); mctx.arc(cx, cy, 11, 0, Math.PI * 2)
+    mctx.fillStyle = '#d63030'; mctx.fill()
+    mctx.strokeStyle = 'white'; mctx.lineWidth = 2; mctx.stroke()
+    mctx.font = 'bold 13px sans-serif'; mctx.fillStyle = 'white'
+    mctx.fillText(String(i + 1), cx, cy + 4)
+  })
+
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), outW, outH, rowLabels }
+}
 
 export default function App() {
   // ?asentaja avaa karsitun asentajanäkymän tämän saman appin sisällä —
@@ -37,6 +122,7 @@ export default function App() {
   const [pdfBlob, setPdfBlob] = useState(null)
   const [pdfName, setPdfName] = useState('')
   const [pdfDownloaded, setPdfDownloaded] = useState(false)
+  const [groupByCategory, setGroupByCategory] = useState(false)
   const [isOnline, setIsOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine)
   const [installers, setInstallers] = useState([])
   const [assignMode, setAssignMode] = useState(false)
@@ -44,11 +130,6 @@ export default function App() {
   const [newInstallerName, setNewInstallerName] = useState('')
   const [newInstallerPin, setNewInstallerPin] = useState('')
   const [assignMsg, setAssignMsg] = useState('')
-  const [supervisorPushOn, setSupervisorPushOn] = useState(false)
-
-  useEffect(() => {
-    getPushStatus().then(setSupervisorPushOn)
-  }, [])
   const fileInputRef = useRef(null)
   const syncTimer = useRef(null)
   const restoredRef = useRef(false)
@@ -402,6 +483,105 @@ export default function App() {
 
     const sevCol = { 'Kriittinen': [180, 40, 40], 'Huomio': [180, 120, 0], 'Info': [30, 140, 80] }
 
+    if (groupByCategory) {
+      // Group observations by fault category, preserving the order in which
+      // each category first appeared, so the report stays predictable.
+      const groups = []
+      const groupIdxByCat = {}
+      obs.forEach(o => {
+        if (!(o.cat in groupIdxByCat)) { groupIdxByCat[o.cat] = groups.length; groups.push({ cat: o.cat, items: [] }) }
+        groups[groupIdxByCat[o.cat]].items.push(o)
+      })
+
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g = groups[gi]
+        if (gi > 0) { doc.addPage(); y = 18 }
+        const catLabel = lang === 'en' ? (CAT_EN[g.cat] || g.cat) : g.cat
+        const worstSev = g.items.some(o => o.sev === 'Kriittinen') ? 'Kriittinen'
+          : g.items.some(o => o.sev === 'Huomio') ? 'Huomio' : 'Info'
+        const col = sevCol[worstSev] || [80, 80, 80]
+        doc.setFillColor(...col)
+        doc.roundedRect(M, y, CW, 7, 1.5, 1.5, 'F')
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(255, 255, 255)
+        doc.text(`${gi + 1}.  ${catLabel}`, M + 4, y + 5)
+        const countLabel = lang === 'en' ? `${g.items.length} item${g.items.length === 1 ? '' : 's'}` : `${g.items.length} kpl`
+        doc.text(countLabel, W - M - 4, y + 5, { align: 'right' })
+        y += 10
+
+        // One combined map for every pin in this category, numbered to match
+        // the list below.
+        const withPin = g.items.filter(o => o.pin)
+        let rowLabelByItem = new Map()
+        if (withPin.length && mapData) {
+          if (y + 150 > 278) { doc.addPage(); y = 18 }
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
+          doc.text(T.location, M + 2, y); y += 4
+          try {
+            const { dataUrl, outW, outH, rowLabels } = renderGroupMapImage(mapData, withPin)
+            let pdfW = CW, pdfH = pdfW * (outH / outW)
+            if (pdfH > 150) { pdfH = 150; pdfW = pdfH * (outW / outH) }
+            if (y + pdfH > 278) { doc.addPage(); y = 18 }
+            doc.addImage(dataUrl, 'JPEG', M, y, pdfW, pdfH)
+            y += pdfH + 4
+            withPin.forEach((o, idx) => rowLabelByItem.set(o, rowLabels[idx]))
+          } catch (e) { console.error('Group map PDF:', e) }
+        }
+
+        // Numbered list of the individual observations in this category —
+        // same numbering as the pins on the map above.
+        g.items.forEach((o, idx) => {
+          if (y + 16 > 278) { doc.addPage(); y = 18 }
+          const sevLabel = lang === 'en' ? (SEV_EN[o.sev] || o.sev) : o.sev
+          const sc = sevCol[o.sev] || [80, 80, 80]
+          const rowLbl = rowLabelByItem.get(o)
+          const rowStr = rowLbl ? `  (${T.row} ${rowLbl})` : ''
+          const timeStr = o.createdAt ? '  ' + new Date(o.createdAt).toLocaleTimeString(T.dateLocale, { hour: '2-digit', minute: '2-digit' }) : ''
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...sc)
+          doc.text(`${idx + 1}. ${sevLabel}${rowStr}${timeStr}`, M + 2, y)
+          y += 5
+          if (o.note) {
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(60, 60, 60)
+            const lines = doc.splitTextToSize(o.note, CW - 6)
+            doc.text(lines, M + 6, y); y += lines.length * 4.5 + 2
+          }
+        })
+        y += 2
+
+        // Photos for every observation in the group, captioned with the
+        // matching item number.
+        for (let idx = 0; idx < g.items.length; idx++) {
+          const o = g.items[idx]
+          for (const photo of o.photos) {
+            const img = new Image(); img.src = photo.src
+            await new Promise(r => { img.onload = r; img.onerror = r })
+            const c = document.createElement('canvas')
+            c.width = img.naturalWidth; c.height = img.naturalHeight
+            c.getContext('2d').drawImage(img, 0, 0)
+            const corrected = c.toDataURL('image/jpeg', 0.85)
+            const nw = img.naturalWidth || 800, nh = img.naturalHeight || 600
+            const sc = Math.min((CW - 8) / nw, 220 / nh)
+            const dw = nw * sc, dh = nh * sc
+            if (y + dh + 6 > 278) { doc.addPage(); y = 18 }
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140)
+            doc.text(`${idx + 1}.`, M + 2, y + 3)
+            try { doc.addImage(corrected, 'JPEG', M + 8, y, dw, dh) } catch {}
+            y += dh + 5
+          }
+        }
+      }
+
+      const tp0 = doc.getNumberOfPages()
+      for (let p = 1; p <= tp0; p++) {
+        doc.setPage(p); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(160, 160, 160)
+        doc.text(`Wisol Oy · ${T.footer} · ${dateStr}`, M, 292)
+        doc.text(`${p} / ${tp0}`, W - M, 292, { align: 'right' })
+      }
+      const blob0 = doc.output('blob')
+      const fn0 = `QC_${(site || 'työmaa').replace(/\s+/g, '_')}_${dateStr.replace(/\./g, '-')}.pdf`
+      setPdfBlob(blob0); setPdfName(fn0); setPdfDownloaded(false); setPdfMode(true)
+      return
+    }
+
     for (let i = 0; i < obs.length; i++) {
       const o = obs[i]
       if (i > 0) { doc.addPage(); y = 18 }
@@ -432,32 +612,25 @@ export default function App() {
       if (o.pin && mapData) {
         if (y + 150 > 278) { doc.addPage(); y = 18 }
         doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
-        const detectedRow = findPinRow(mapData, o.pin)
-        doc.text(`${T.location}${detectedRow ? '  (' + T.row + ' ' + detectedRow.label + ')' : ''}`, M + 2, y); y += 4
+        // Uses the shared findPinRow (shared.js), which groups all insert
+        // segments at the same height into one logical row and restricts
+        // the label search to that same row band — fixes the earlier bug
+        // where a pin in the leftmost segment of a row could grab a
+        // completely different row's number label.
+        const rowInfoPdf = findPinRow(mapData, o.pin)
+        doc.text(`${T.location}${rowInfoPdf ? '  (' + T.row + ' ' + rowInfoPdf.label + ')' : ''}`, M + 2, y); y += 4
         try {
           const PANEL_W = 1.15, TABLE_D = 4.29
           const sxm = mapData.W / (mapData.maxX - mapData.minX)
           const sym = mapData.H / (mapData.maxY - mapData.minY)
 
-          // Find which row (insert) the pin sits in, so we can highlight that
-          // exact row and its number — otherwise it's hard to tell which of
-          // several close-together row numbers actually belongs to the pin.
           const pinSvgX = o.pin.x * mapData.W, pinSvgY = o.pin.y * mapData.H
-          let pinRowIdx = -1
-          mapData.inserts.forEach((ins, idx) => {
-            const tw = ins.panels * PANEL_W * sxm, th = TABLE_D * sym
-            if (pinSvgX >= ins.x - 3 && pinSvgX <= ins.x + tw + 3 && pinSvgY >= ins.y - 3 && pinSvgY <= ins.y + th + 3) {
-              pinRowIdx = idx
-            }
-          })
+          const pinRowIdx = rowInfoPdf ? rowInfoPdf.rowIdx : -1
+          const pinRowInsertIdxs = rowInfoPdf ? rowInfoPdf.rowInsertIdxs : []
           let pinLabelIdx = -1
-          if (pinRowIdx >= 0) {
-            const ins = mapData.inserts[pinRowIdx]
-            const targetX = ins.x + ins.panels * PANEL_W * sxm, targetY = ins.y + (TABLE_D * sym) / 2
-            let best = Infinity
+          if (rowInfoPdf) {
             mapData.rowNumbers.forEach((t, idx) => {
-              const d = Math.hypot(t.x - targetX, t.y - targetY)
-              if (d < best) { best = d; pinLabelIdx = idx }
+              if (t.text === rowInfoPdf.label) pinLabelIdx = idx
             })
           }
 
@@ -498,7 +671,7 @@ export default function App() {
           mapData.inserts.forEach((ins, idx) => {
             const tw = ins.panels * PANEL_W * sxm * kx
             const th = TABLE_D * sym * ky
-            const isPinRow = idx === pinRowIdx
+            const isPinRow = pinRowInsertIdxs.includes(idx)
             mctx.fillStyle = isPinRow ? 'rgba(214,48,48,0.35)' : 'rgba(26,47,204,0.22)'
             mctx.strokeStyle = isPinRow ? '#d63030' : '#1a2fcc'
             mctx.lineWidth = isPinRow ? 2 : 0.7
@@ -630,12 +803,9 @@ export default function App() {
           <button onClick={newReport} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: '#6670a0', padding: '2px 0' }}>
             🔄 Uusi raportti
           </button>
-          <button onClick={async () => {
-              const r = await subscribeToPush('supervisor')
-              if (r.ok) { setSupervisorPushOn(true) } else { setAssignMsg(r.reason || 'Ei onnistunut'); setTimeout(() => setAssignMsg(''), 3000) }
-            }}
-            style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: supervisorPushOn ? '#1a8a50' : '#6670a0', padding: '2px 0', fontWeight: supervisorPushOn ? 700 : 400 }}>
-            {supervisorPushOn ? '🔔 Ilmoitukset päällä' : '🔔 Salli ilmoitukset (kun asentaja korjaa)'}
+          <button onClick={async () => { const r = await subscribeToPush('supervisor'); setAssignMsg(r.ok ? '🔔 Ilmoitukset päällä' : (r.reason || 'Ei onnistunut')); setTimeout(() => setAssignMsg(''), 3000) }}
+            style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: '#6670a0', padding: '2px 0' }}>
+            🔔 Salli ilmoitukset (kun asentaja korjaa)
           </button>
         </div>
 
@@ -814,16 +984,22 @@ export default function App() {
       </div>
 
       {/* Bottom bar */}
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, maxWidth: 480, margin: '0 auto', padding: '10px 16px env(safe-area-inset-bottom, 14px)', background: '#f4f6fb', borderTop: '1px solid #d0d5e8', display: 'flex', gap: 10, zIndex: 20 }}>
-        <div style={{ background: '#fff', border: '1px solid #d0d5e8', borderRadius: 8, padding: '0 14px', display: 'flex', alignItems: 'center', fontSize: 13, color: '#6670a0', whiteSpace: 'nowrap' }}>
-          {obs.length === 1 ? '1 havainto' : `${obs.length} havaintoa`}
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, maxWidth: 480, margin: '0 auto', background: '#f4f6fb', borderTop: '1px solid #d0d5e8', zIndex: 20 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px 0', fontSize: 12.5, color: '#4a5480', userSelect: 'none' }}>
+          <input type="checkbox" checked={groupByCategory} onChange={e => setGroupByCategory(e.target.checked)} style={{ width: 16, height: 16 }} />
+          Yhdistä samat vikatyypit samaan karttakuvaan
+        </label>
+        <div style={{ padding: '8px 16px env(safe-area-inset-bottom, 14px)', display: 'flex', gap: 10 }}>
+          <div style={{ background: '#fff', border: '1px solid #d0d5e8', borderRadius: 8, padding: '0 14px', display: 'flex', alignItems: 'center', fontSize: 13, color: '#6670a0', whiteSpace: 'nowrap' }}>
+            {obs.length === 1 ? '1 havainto' : `${obs.length} havaintoa`}
+          </div>
+          <button onClick={() => exportPDF('fi')} style={{ flex: 1, padding: 12, background: '#1a2fcc', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            📄 PDF FI
+          </button>
+          <button onClick={() => exportPDF('en')} style={{ flex: 1, padding: 12, background: '#fff', border: '1.5px solid #1a2fcc', borderRadius: 8, color: '#1a2fcc', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            📄 PDF EN
+          </button>
         </div>
-        <button onClick={() => exportPDF('fi')} style={{ flex: 1, padding: 12, background: '#1a2fcc', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-          📄 PDF FI
-        </button>
-        <button onClick={() => exportPDF('en')} style={{ flex: 1, padding: 12, background: '#fff', border: '1.5px solid #1a2fcc', borderRadius: 8, color: '#1a2fcc', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-          📄 PDF EN
-        </button>
       </div>
 
       {/* PDF overlay */}
