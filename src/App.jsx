@@ -508,12 +508,12 @@ export default function App() {
           : g.items.some(o => o.sev === 'Huomio') ? 'Huomio' : 'Info'
         const col = sevCol[worstSev] || [80, 80, 80]
         doc.setFillColor(...col)
-        doc.roundedRect(M, y, CW, 7, 1.5, 1.5, 'F')
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(255, 255, 255)
-        doc.text(`${gi + 1}.  ${catLabel}`, M + 4, y + 5)
+        doc.roundedRect(M, y, CW, 8, 1.5, 1.5, 'F')
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255, 255, 255)
+        doc.text(`${gi + 1}.  ${catLabel}`, M + 4, y + 5.7)
         const countLabel = lang === 'en' ? `${g.items.length} item${g.items.length === 1 ? '' : 's'}` : `${g.items.length} kpl`
-        doc.text(countLabel, W - M - 4, y + 5, { align: 'right' })
-        y += 10
+        doc.text(countLabel, W - M - 4, y + 5.7, { align: 'right' })
+        y += 11
 
         // One combined map for every pin in this category, numbered to match
         // the list below.
@@ -521,8 +521,8 @@ export default function App() {
         let rowLabelByItem = new Map()
         if (withPin.length && mapData) {
           if (y + 150 > 278) { doc.addPage(); y = 18 }
-          doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
-          doc.text(T.location, M + 2, y); y += 4
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(100, 100, 120)
+          doc.text(T.location, M + 2, y); y += 4.5
           try {
             const { dataUrl, outW, outH, rowLabels } = renderGroupMapImage(mapData, withPin)
             let pdfW = CW, pdfH = pdfW * (outH / outW)
@@ -543,13 +543,13 @@ export default function App() {
           const rowLbl = rowLabelByItem.get(o)
           const rowStr = rowLbl ? `  (${T.row} ${rowLbl})` : ''
           const timeStr = o.createdAt ? '  ' + new Date(o.createdAt).toLocaleTimeString(T.dateLocale, { hour: '2-digit', minute: '2-digit' }) : ''
-          doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...sc)
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sc)
           doc.text(`${idx + 1}. ${sevLabel}${rowStr}${timeStr}`, M + 2, y)
-          y += 5
+          y += 5.5
           if (o.note) {
-            doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(60, 60, 60)
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(60, 60, 60)
             const lines = doc.splitTextToSize(o.note, CW - 6)
-            doc.text(lines, M + 6, y); y += lines.length * 4.5 + 2
+            doc.text(lines, M + 6, y); y += lines.length * 5 + 2
           }
         })
         y += 2
@@ -597,28 +597,28 @@ export default function App() {
       const lbl = o.cat === 'Muu asia' && o.muu ? `${T.other} – ${o.muu}` : catLabel
       const col = sevCol[o.sev] || [80, 80, 80]
       doc.setFillColor(...col)
-      doc.roundedRect(M, y, CW, 7, 1.5, 1.5, 'F')
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(255, 255, 255)
-      doc.text(`${i + 1}.  ${lbl}`, M + 4, y + 5)
-      doc.text(sevLabel, W - M - 4, y + 5, { align: 'right' })
-      y += 10
+      doc.roundedRect(M, y, CW, 8, 1.5, 1.5, 'F')
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255, 255, 255)
+      doc.text(`${i + 1}.  ${lbl}`, M + 4, y + 5.7)
+      doc.text(sevLabel, W - M - 4, y + 5.7, { align: 'right' })
+      y += 11
 
       if (o.createdAt) {
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140)
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(140, 140, 140)
         doc.text(new Date(o.createdAt).toLocaleTimeString(T.dateLocale, { hour: '2-digit', minute: '2-digit' }), M + 2, y)
-        y += 4
+        y += 4.5
       }
 
       if (o.note) {
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(40, 40, 40)
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(40, 40, 40)
         const lines = doc.splitTextToSize(o.note, CW - 4)
-        doc.text(lines, M + 2, y); y += lines.length * 5 + 3
+        doc.text(lines, M + 2, y); y += lines.length * 5.5 + 3
       }
 
       // Map thumbnail - uses the zoom level left on screen, centered on the pin, pin's row highlighted in red
       if (o.pin && mapData) {
         if (y + 150 > 278) { doc.addPage(); y = 18 }
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 120)
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(100, 100, 120)
         // Uses the shared findPinRow (shared.js), which groups all insert
         // segments at the same height into one logical row and restricts
         // the label search to that same row band — fixes the earlier bug
