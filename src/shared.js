@@ -26,6 +26,11 @@ export const CAT_EN = {
   'Kannake vääntynyt tai rikki': 'Bracket bent or broken',
   'DC-kouru katkaisematta': 'DC conduit not cut open',
   'Tupla poraruuvit puuttuvat': 'Double drill screws missing',
+  'Poraruuvi puuttuu': 'Drill screw missing',
+  'Koropalojen suoristus': 'Spacer blocks need straightening',
+  'Shimmi levy puuttuu': 'Shim plate missing',
+  'Paalu pultti löysällä': 'Pile bolt loose',
+  'Paalu pultti puuttuu': 'Pile bolt missing',
   'Muu asia': 'Other',
 }
 export const SEV_EN = { Kriittinen: 'Critical', Huomio: 'Attention', Info: 'Info' }
