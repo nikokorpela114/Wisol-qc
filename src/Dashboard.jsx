@@ -117,6 +117,14 @@ export default function Dashboard() {
   })
   const clearSelection = () => setSelected(new Set())
 
+  const toggleSelectGroup = items => setSelected(prev => {
+    const ids = items.map(o => o.id)
+    const allSelected = ids.every(id => prev.has(id))
+    const next = new Set(prev)
+    ids.forEach(id => allSelected ? next.delete(id) : next.add(id))
+    return next
+  })
+
   async function hideSelected() {
     if (selected.size === 0) return
     setBusy(true)
@@ -237,6 +245,7 @@ export default function Dashboard() {
                 const critCount = g.items.filter(o => o.sev === 'Kriittinen').length
                 const title = g.team ? `🧑‍🤝‍🧑 ${g.team.name}` : g.installer ? `👷 ${g.installer.name}` : '📋 Ei lähetetty kenellekään'
                 const headerBg = g.team ? '#f1ecfb' : g.installer ? '#eef0f7' : '#fdf0d5'
+                const allSelected = g.items.length > 0 && g.items.every(o => selected.has(o.id))
                 return (
                   <div key={g.key} style={cardStyle}>
                     <div style={{ padding: '13px 16px', background: headerBg, borderBottom: '1px solid #e4e7f3', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -250,6 +259,10 @@ export default function Dashboard() {
                         {installers.filter(i => i.team_id === g.team.id).map(i => i.name).join(', ') || 'Ei jäseniä'}
                       </div>
                     )}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 16px', fontSize: 12, color: '#6670a0', borderBottom: '1px solid #f0f1f7', cursor: 'pointer', userSelect: 'none' }}>
+                      <input type="checkbox" checked={allSelected} onChange={() => toggleSelectGroup(g.items)} />
+                      {allSelected ? 'Poista kaikki valinnat' : 'Valitse kaikki'}
+                    </label>
                     <div style={{ maxHeight: 440, overflowY: 'auto' }}>
                       {g.items.map(o => (
                         <ObsRow key={o.id} o={o} fmtTime={fmtTime} selected={selected.has(o.id)} onToggle={() => toggleSelect(o.id)} />
@@ -267,7 +280,9 @@ export default function Dashboard() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: '#eef0f7', textAlign: 'left' }}>
-                  <th style={{ ...thStyle, width: 34 }}></th>
+                  <th style={{ ...thStyle, width: 34 }}>
+                    <input type="checkbox" checked={fixedSorted.length > 0 && fixedSorted.every(o => selected.has(o.id))} onChange={() => toggleSelectGroup(fixedSorted)} />
+                  </th>
                   <th style={thStyle}>Vika</th>
                   <th style={thStyle}>Vakavuus</th>
                   <th style={thStyle}>Työmaa / rivi</th>
@@ -293,7 +308,9 @@ export default function Dashboard() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: '#eef0f7', textAlign: 'left' }}>
-                  <th style={{ ...thStyle, width: 34 }}></th>
+                  <th style={{ ...thStyle, width: 34 }}>
+                    <input type="checkbox" checked={hiddenSorted.length > 0 && hiddenSorted.every(o => selected.has(o.id))} onChange={() => toggleSelectGroup(hiddenSorted)} />
+                  </th>
                   <th style={thStyle}>Vika</th>
                   <th style={thStyle}>Vakavuus</th>
                   <th style={thStyle}>Työmaa / rivi</th>
