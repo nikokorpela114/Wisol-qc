@@ -23,6 +23,8 @@ export default function Dashboard() {
   const [selected, setSelected] = useState(new Set())
   const [busy, setBusy] = useState(false)
   const [newTeamName, setNewTeamName] = useState('')
+  const [newInstallerName, setNewInstallerName] = useState('')
+  const [newInstallerPin, setNewInstallerPin] = useState('')
 
   const load = useCallback(async () => {
     const [{ data: o, error: oErr }, { data: i, error: iErr }, { data: tm, error: tErr }] = await Promise.all([
@@ -169,6 +171,30 @@ export default function Dashboard() {
     if (error) { alert('Tallennus epäonnistui: ' + error.message); return }
     if (!data || data.length === 0) {
       alert('Tallennus ei muuttanut mitään — todennäköisesti Row Level Security estää päivityksen. Aja teams_rls_fix.sql Supabasen SQL Editorissa.')
+      return
+    }
+    load()
+  }
+
+  async function addInstaller() {
+    const name = newInstallerName.trim(), pinVal = newInstallerPin.trim()
+    if (!name || pinVal.length < 4) { alert('Anna nimi ja vähintään 4-numeroinen PIN.'); return }
+    const { data, error } = await sb.from('installers').insert([{ name, pin: pinVal }]).select()
+    if (error) { alert('Lisäys epäonnistui: ' + error.message); return }
+    if (!data || data.length === 0) { alert('Lisäys ei tallentunut — tarkista RLS-oikeudet (teams_rls_fix.sql).'); return }
+    setNewInstallerName(''); setNewInstallerPin('')
+    load()
+  }
+
+  async function deleteInstaller(installer) {
+    const assignedCount = obs.filter(o => o.assigned_installer_id === installer.id).length
+    const warn = assignedCount > 0
+      ? `${installer.name} on merkitty ${assignedCount} havainnon korjaajaksi/vastaanottajaksi. Nämä havainnot säilyvät, mutta "korjaaja"-tieto niissä tyhjenee. Poistetaanko silti?`
+      : `Poistetaanko asentaja ${installer.name}?`
+    if (!window.confirm(warn)) return
+    const { error } = await sb.from('installers').delete().eq('id', installer.id)
+    if (error) {
+      alert('Poisto epäonnistui: ' + error.message + '\n\nJos virhe mainitsee viiteavaimen (foreign key), aja installer_delete_fix.sql Supabasen SQL Editorissa.')
       return
     }
     load()
@@ -365,16 +391,39 @@ export default function Dashboard() {
 
             <div style={{ ...cardStyle, padding: 18 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e', marginBottom: 10 }}>Kaikki asentajat</div>
-              {installers.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0' }}>Ei asentajia vielä</div>}
+              {installers.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0', marginBottom: 10 }}>Ei asentajia vielä</div>}
               {installers.map(i => (
                 <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid #f4f5fa', gap: 8 }}>
-                  <span style={{ fontSize: 13 }}>{i.name}</span>
+                  <span style={{ fontSize: 13, flex: 1, minWidth: 0 }}>{i.name}</span>
                   <select value={i.team_id || ''} onChange={e => setInstallerTeam(i.id, e.target.value || null)} style={{ ...selectStyle, padding: '5px 8px', fontSize: 12 }}>
                     <option value="">Ei tiimiä</option>
                     {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
+                  <button onClick={() => deleteInstaller(i)} title="Poista asentaja" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
                 </div>
               ))}
+
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa2c0', marginTop: 14, marginBottom: 8, textTransform: 'uppercase' }}>+ Uusi asentaja</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  placeholder="Nimi"
+                  value={newInstallerName}
+                  onChange={e => setNewInstallerName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addInstaller()}
+                  style={{ ...selectStyle, flex: 2 }}
+                />
+                <input
+                  placeholder="PIN"
+                  value={newInstallerPin}
+                  onChange={e => setNewInstallerPin(e.target.value.replace(/\D/g, ''))}
+                  onKeyDown={e => e.key === 'Enter' && addInstaller()}
+                  inputMode="numeric"
+                  maxLength={6}
+                  style={{ ...selectStyle, flex: 1 }}
+                />
+                <button onClick={addInstaller} style={{ background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 8, padding: '0 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>+</button>
+              </div>
+            </div>
             </div>
           </div>
         )}
