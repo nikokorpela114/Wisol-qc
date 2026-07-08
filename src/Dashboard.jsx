@@ -120,15 +120,17 @@ export default function Dashboard() {
   async function hideSelected() {
     if (selected.size === 0) return
     setBusy(true)
-    const { error } = await sb.from('observations').update({ hidden_at: new Date().toISOString() }).in('id', [...selected])
+    const { data, error } = await sb.from('observations').update({ hidden_at: new Date().toISOString() }).in('id', [...selected]).select()
     if (error) { console.error(error); alert('Piilotus epäonnistui: ' + error.message) }
+    else if (!data || data.length === 0) alert('Piilotus ei muuttanut mitään — aja teams_rls_fix.sql Supabasen SQL Editorissa.')
     clearSelection(); setBusy(false); load()
   }
   async function unhideSelected() {
     if (selected.size === 0) return
     setBusy(true)
-    const { error } = await sb.from('observations').update({ hidden_at: null }).in('id', [...selected])
+    const { data, error } = await sb.from('observations').update({ hidden_at: null }).in('id', [...selected]).select()
     if (error) { console.error(error); alert('Palautus epäonnistui: ' + error.message) }
+    else if (!data || data.length === 0) alert('Palautus ei muuttanut mitään — aja teams_rls_fix.sql Supabasen SQL Editorissa.')
     clearSelection(); setBusy(false); load()
   }
   async function deleteSelected() {
@@ -155,8 +157,12 @@ export default function Dashboard() {
     load()
   }
   async function setInstallerTeam(installerId, teamId) {
-    const { error } = await sb.from('installers').update({ team_id: teamId || null }).eq('id', installerId)
+    const { data, error } = await sb.from('installers').update({ team_id: teamId || null }).eq('id', installerId).select()
     if (error) { alert('Tallennus epäonnistui: ' + error.message); return }
+    if (!data || data.length === 0) {
+      alert('Tallennus ei muuttanut mitään — todennäköisesti Row Level Security estää päivityksen. Aja teams_rls_fix.sql Supabasen SQL Editorissa.')
+      return
+    }
     load()
   }
 
