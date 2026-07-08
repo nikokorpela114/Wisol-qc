@@ -424,7 +424,6 @@ export default function Dashboard() {
                 <button onClick={addInstaller} style={{ background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 8, padding: '0 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>+</button>
               </div>
             </div>
-            </div>
           </div>
         )}
       </div>
