@@ -389,22 +389,24 @@ export default function Dashboard() {
               />
             ))}
 
-            <div style={{ ...cardStyle, padding: 18 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e', marginBottom: 10 }}>Kaikki asentajat</div>
+            <div style={{ ...cardStyle, padding: 20, gridColumn: '1 / -1' }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e', marginBottom: 14 }}>Kaikki asentajat</div>
               {installers.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0', marginBottom: 10 }}>Ei asentajia vielä</div>}
-              {installers.map(i => (
-                <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid #f4f5fa', gap: 8 }}>
-                  <span style={{ fontSize: 13, flex: 1, minWidth: 0 }}>{i.name}</span>
-                  <select value={i.team_id || ''} onChange={e => setInstallerTeam(i.id, e.target.value || null)} style={{ ...selectStyle, padding: '5px 8px', fontSize: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '4px 24px' }}>
+                {installers.map(i => (
+                  <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f5fa', gap: 10 }}>
+                    <span style={{ fontSize: 14, flex: 1, minWidth: 0 }}>{i.name}</span>
+                    <select value={i.team_id || ''} onChange={e => setInstallerTeam(i.id, e.target.value || null)} style={{ ...selectStyle, padding: '6px 10px', fontSize: 12.5 }}>
                     <option value="">Ei tiimiä</option>
                     {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
-                  <button onClick={() => deleteInstaller(i)} title="Poista asentaja" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
-                </div>
-              ))}
+                    </select>
+                    <button onClick={() => deleteInstaller(i)} title="Poista asentaja" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
+                  </div>
+                ))}
+              </div>
 
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa2c0', marginTop: 14, marginBottom: 8, textTransform: 'uppercase' }}>+ Uusi asentaja</div>
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa2c0', marginTop: 18, marginBottom: 8, textTransform: 'uppercase' }}>+ Uusi asentaja</div>
+              <div style={{ display: 'flex', gap: 6, maxWidth: 480 }}>
                 <input
                   placeholder="Nimi"
                   value={newInstallerName}
