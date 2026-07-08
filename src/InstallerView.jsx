@@ -92,9 +92,9 @@ export default function InstallerView() {
     setLoginErr('')
     const inst = installers.find(i => i.id === selectedId)
     if (!inst) return
-    sb.from('installers').select('id, name, pin').eq('id', selectedId).single().then(({ data }) => {
+    sb.from('installers').select('id, name, pin, team_id').eq('id', selectedId).single().then(({ data }) => {
       if (data && String(data.pin) === String(pin)) {
-        const s = { id: data.id, name: data.name }
+        const s = { id: data.id, name: data.name, teamId: data.team_id || null }
         localStorage.setItem(SESSION_KEY, JSON.stringify(s))
         setSession(s)
       } else {
@@ -109,14 +109,17 @@ export default function InstallerView() {
     setTasks(null)
   }
 
-  // Fetch open tasks assigned to this installer
+  // Fetch open tasks assigned to this installer directly, OR to their team
+  // (if they belong to one) — a task sent to a whole team should show up
+  // for every member of it, not just whoever it happened to be attached to.
   async function loadTasks() {
     if (!session) return
-    const { data } = await sb.from('observations')
-      .select('*')
-      .eq('assigned_installer_id', session.id)
-      .eq('status', 'avoin')
-      .order('created_at', { ascending: true })
+    let query = sb.from('observations').select('*').eq('status', 'avoin')
+    query = session.teamId
+      ? query.or(`assigned_installer_id.eq.${session.id},assigned_team_id.eq.${session.teamId}`)
+      : query.eq('assigned_installer_id', session.id)
+    const { data, error } = await query.order('created_at', { ascending: true })
+    if (error) console.error('loadTasks failed:', error)
     setTasks(data || [])
   }
   useEffect(() => { loadTasks() }, [session])

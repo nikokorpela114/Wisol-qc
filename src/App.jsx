@@ -145,8 +145,10 @@ export default function App() {
   const [groupByCategory, setGroupByCategory] = useState(false)
   const [isOnline, setIsOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine)
   const [installers, setInstallers] = useState([])
+  const [teams, setTeams] = useState([])
   const [assignMode, setAssignMode] = useState(false)
   const [assignInstallerId, setAssignInstallerId] = useState('')
+  const [assignTeamId, setAssignTeamId] = useState('')
   const [newInstallerName, setNewInstallerName] = useState('')
   const [newInstallerPin, setNewInstallerPin] = useState('')
   const [assignMsg, setAssignMsg] = useState('')
@@ -207,6 +209,7 @@ export default function App() {
       local_id: o.id,
       status: o.status || 'avoin',
       assigned_installer_id: o.assignedInstallerId ?? null,
+      assigned_team_id: o.assignedTeamId ?? null,
       report_batch: o.reportBatch ?? null,
     }
     try {
@@ -318,6 +321,7 @@ export default function App() {
 
   useEffect(() => {
     sb.from('installers').select('*').order('name').then(({ data }) => { if (data) setInstallers(data) })
+    sb.from('teams').select('*').order('name').then(({ data }) => { if (data) setTeams(data) })
   }, [])
 
   async function addInstaller() {
@@ -330,28 +334,52 @@ export default function App() {
     }
   }
 
-  // Assigns every current observation to the chosen installer, tags them
-  // with a shared report_batch so the installer sees them as one job, and
-  // pushes a real phone notification to that installer.
+  // Assigns every current observation either to one installer OR to a
+  // whole team (assignTeamId), tags them with a shared report_batch so the
+  // recipient(s) see them as one job, and pushes a real phone notification
+  // — to the single installer, or to every member of the chosen team.
   async function assignAndNotify() {
-    if (!assignInstallerId || obs.length === 0) return
+    const target = assignTeamId || assignInstallerId
+    if (!target || obs.length === 0) return
     const reportBatch = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-    const installer = installers.find(i => i.id === assignInstallerId)
     setAssignMsg('Lähetetään...')
 
-    const updated = obs.map(o => ({ ...o, assignedInstallerId: assignInstallerId, status: 'avoin', reportBatch }))
-    setObs(updated)
-    await Promise.all(updated.map(o => saveObs(o, site, inspector, rivi)))
+    if (assignTeamId) {
+      const team = teams.find(t => t.id === assignTeamId)
+      const members = installers.filter(i => i.team_id === assignTeamId)
+      const updated = obs.map(o => ({ ...o, assignedInstallerId: null, assignedTeamId: assignTeamId, status: 'avoin', reportBatch }))
+      setObs(updated)
+      await Promise.all(updated.map(o => saveObs(o, site, inspector, rivi)))
 
-    const res = await sendPushNotification({
-      role: 'installer',
-      installerId: assignInstallerId,
-      title: 'Uusi tarkistuslista',
-      body: `${updated.length} havaintoa — ${site}`,
-      url: '/?asentaja=1',
-      tag: reportBatch,
-    })
-    setAssignMsg(res?.sent > 0 ? `✓ Lähetetty ${installer?.name || ''}` : '✓ Tallennettu (asentaja ei ehkä ole vielä ottanut ilmoituksia käyttöön)')
+      // Jokainen tiimin jäsen saa oman ilmoituksensa — kaikki näkevät saman
+      // tehtävälistan (InstallerView hakee tehtävät myös assigned_team_id:n
+      // perusteella, ei vain omalla installer_id:llään).
+      const results = await Promise.all(members.map(m => sendPushNotification({
+        role: 'installer',
+        installerId: m.id,
+        title: 'Uusi tarkistuslista',
+        body: `${updated.length} havaintoa — ${site}`,
+        url: '/?asentaja=1',
+        tag: reportBatch,
+      })))
+      const anySent = results.some(r => r?.sent > 0)
+      setAssignMsg(anySent ? `✓ Lähetetty tiimille ${team?.name || ''}` : '✓ Tallennettu (tiimin jäsenet eivät ehkä ole vielä ottaneet ilmoituksia käyttöön)')
+    } else {
+      const installer = installers.find(i => i.id === assignInstallerId)
+      const updated = obs.map(o => ({ ...o, assignedInstallerId: assignInstallerId, assignedTeamId: null, status: 'avoin', reportBatch }))
+      setObs(updated)
+      await Promise.all(updated.map(o => saveObs(o, site, inspector, rivi)))
+
+      const res = await sendPushNotification({
+        role: 'installer',
+        installerId: assignInstallerId,
+        title: 'Uusi tarkistuslista',
+        body: `${updated.length} havaintoa — ${site}`,
+        url: '/?asentaja=1',
+        tag: reportBatch,
+      })
+      setAssignMsg(res?.sent > 0 ? `✓ Lähetetty ${installer?.name || ''}` : '✓ Tallennettu (asentaja ei ehkä ole vielä ottanut ilmoituksia käyttöön)')
+    }
     setTimeout(() => setAssignMsg(''), 4000)
   }
 
@@ -980,10 +1008,20 @@ export default function App() {
 
           {assignMode && (
             <div style={{ background: '#fff', border: '1px solid #d0d5e8', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <select value={assignInstallerId} onChange={e => setAssignInstallerId(e.target.value)} style={selectStyle}>
+              <select value={assignInstallerId} onChange={e => { setAssignInstallerId(e.target.value); if (e.target.value) setAssignTeamId('') }} style={selectStyle}>
                 <option value="">Valitse asentaja…</option>
                 {installers.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
               </select>
+
+              {teams.length > 0 && (
+                <>
+                  <div style={{ textAlign: 'center', fontSize: 11, color: '#9aa2c0' }}>— TAI —</div>
+                  <select value={assignTeamId} onChange={e => { setAssignTeamId(e.target.value); if (e.target.value) setAssignInstallerId('') }} style={selectStyle}>
+                    <option value="">Valitse tiimi…</option>
+                    {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </>
+              )}
 
               <div style={{ display: 'flex', gap: 6 }}>
                 <input placeholder="Uusi asentaja: nimi" value={newInstallerName} onChange={e => setNewInstallerName(e.target.value)}
@@ -993,8 +1031,8 @@ export default function App() {
                 <button onClick={addInstaller} style={{ padding: '0 12px', background: '#eef0f7', border: '1px solid #d0d5e8', borderRadius: 8, color: '#1a2fcc', fontSize: 13 }}>+</button>
               </div>
 
-              <button onClick={assignAndNotify} disabled={!assignInstallerId || obs.length === 0}
-                style={{ padding: 12, background: assignInstallerId ? '#1a8a50' : '#c8cce0', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 14 }}>
+              <button onClick={assignAndNotify} disabled={(!assignInstallerId && !assignTeamId) || obs.length === 0}
+                style={{ padding: 12, background: (assignInstallerId || assignTeamId) ? '#1a8a50' : '#c8cce0', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 14 }}>
                 📤 Lähetä {obs.length === 1 ? '1 havainto' : `${obs.length} havaintoa`}
               </button>
               {assignMsg && <div style={{ fontSize: 12, color: '#1a8a50', textAlign: 'center' }}>{assignMsg}</div>}
