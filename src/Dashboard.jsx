@@ -330,27 +330,15 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {teams.map(team => {
-              const members = installers.filter(i => i.team_id === team.id)
-              return (
-                <div key={team.id} style={cardStyle}>
-                  <div style={{ padding: '13px 16px', background: '#f1ecfb', borderBottom: '1px solid #e4e7f3', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e' }}>🧑‍🤝‍🧑 {team.name}</span>
-                    <button onClick={() => deleteTeam(team.id)} style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 12, cursor: 'pointer' }}>Poista tiimi</button>
-                  </div>
-                  <div style={{ padding: 14 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa2c0', marginBottom: 8, textTransform: 'uppercase' }}>Jäsenet ({members.length})</div>
-                    {members.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0', marginBottom: 8 }}>Ei jäseniä vielä</div>}
-                    {members.map(m => (
-                      <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f4f5fa' }}>
-                        <span style={{ fontSize: 13 }}>{m.name}</span>
-                        <button onClick={() => setInstallerTeam(m.id, null)} style={{ background: 'none', border: 'none', color: '#9aa2c0', fontSize: 12, cursor: 'pointer' }}>Poista tiimistä</button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
+            {teams.map(team => (
+              <TeamCard
+                key={team.id}
+                team={team}
+                installers={installers}
+                onDeleteTeam={deleteTeam}
+                onSetInstallerTeam={setInstallerTeam}
+              />
+            ))}
 
             <div style={{ ...cardStyle, padding: 18 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e', marginBottom: 10 }}>Kaikki asentajat</div>
@@ -366,6 +354,51 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TeamCard({ team, installers, onDeleteTeam, onSetInstallerTeam }) {
+  const [addId, setAddId] = useState('')
+  const members = installers.filter(i => i.team_id === team.id)
+  const available = installers.filter(i => i.team_id !== team.id)
+
+  function addMember() {
+    if (!addId) return
+    onSetInstallerTeam(addId, team.id)
+    setAddId('')
+  }
+
+  return (
+    <div style={cardStyle}>
+      <div style={{ padding: '13px 16px', background: '#f1ecfb', borderBottom: '1px solid #e4e7f3', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e' }}>🧑‍🤝‍🧑 {team.name}</span>
+        <button onClick={() => onDeleteTeam(team.id)} style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 12, cursor: 'pointer' }}>Poista tiimi</button>
+      </div>
+      <div style={{ padding: 14 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa2c0', marginBottom: 8, textTransform: 'uppercase' }}>Jäsenet ({members.length})</div>
+        {members.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0', marginBottom: 8 }}>Ei jäseniä vielä</div>}
+        {members.map(m => (
+          <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f4f5fa' }}>
+            <span style={{ fontSize: 13 }}>{m.name}</span>
+            <button onClick={() => onSetInstallerTeam(m.id, null)} style={{ background: 'none', border: 'none', color: '#9aa2c0', fontSize: 12, cursor: 'pointer' }}>Poista tiimistä</button>
+          </div>
+        ))}
+
+        {available.length > 0 ? (
+          <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
+            <select value={addId} onChange={e => setAddId(e.target.value)} style={{ ...selectStyle, flex: 1, padding: '7px 10px', fontSize: 12.5 }}>
+              <option value="">+ Lisää jäsen…</option>
+              {available.map(i => <option key={i.id} value={i.id}>{i.name}{i.team_id ? ' (vaihda tiimistä)' : ''}</option>)}
+            </select>
+            <button onClick={addMember} disabled={!addId} style={{ background: addId ? '#1a2fcc' : '#c8cce0', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 700, cursor: addId ? 'pointer' : 'default' }}>
+              Lisää
+            </button>
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: '#c0c4d8', marginTop: 12 }}>Kaikki asentajat ovat jo tässä tiimissä</div>
         )}
       </div>
     </div>
