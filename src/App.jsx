@@ -148,6 +148,16 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine)
   const [installers, setInstallers] = useState([])
   const [teams, setTeams] = useState([])
+  // Pikalisäys: kun tämä on asetettu jonkin havainnon id:hen, saman kartan
+  // napautukset eivät enää siirrä TÄMÄN havainnon pinniä vaan luovat uuden,
+  // samankaltaisen havainnon napautettuun kohtaan — kartta pysyy koko ajan
+  // samana komponenttina (zoom/pan säilyy), eikä jokaista uutta havaintoa
+  // tarvitse zoomata erikseen. Uudet pikalisätyt havainnot renderöityvät
+  // kevyinä "collapsed"-riveinä (ei omaa raskasta karttaa) suorituskyvyn
+  // vuoksi, jos niitä syntyy paljon peräkkäin.
+  const [quickAddId, setQuickAddId] = useState(null)
+  const [collapsedIds, setCollapsedIds] = useState(() => new Set())
+  const [quickAddCounts, setQuickAddCounts] = useState({})
   const [assignMode, setAssignMode] = useState(false)
   const [assignInstallerId, setAssignInstallerId] = useState('')
   const [assignTeamId, setAssignTeamId] = useState('')
@@ -425,6 +435,36 @@ export default function App() {
       saveObs(updated, site, inspector, rivi)
       return updated
     }))
+  }
+
+  // Napautuksen käsittelijä havainnon kartalle. Normaalisti siirtää tämän
+  // havainnon omaa pinniä. Mutta jos pikalisäys on päällä TÄLLE havainnolle
+  // JA sillä on jo oma pinni, uusi napautus ei koske olemassa olevaan
+  // pinniin lainkaan — se luo kokonaan uuden, samankategorisen havainnon
+  // napautettuun kohtaan. Kartta itse ei koskaan unmounttaudu tämän aikana,
+  // joten zoom/pan säilyy napautusten välillä.
+  function handleMapTap(o, pin) {
+    if (quickAddId === o.id && o.pin) {
+      const id = ++idCounter
+      const clone = {
+        id, cat: o.cat, sev: o.sev, note: '', muu: o.muu, photos: [],
+        pin, db_id: null, createdAt: new Date().toISOString(),
+      }
+      setObs(prev => [...prev, clone])
+      saveObs(clone, site, inspector, rivi)
+      setCollapsedIds(prev => { const next = new Set(prev); next.add(id); return next })
+      setQuickAddCounts(prev => ({ ...prev, [o.id]: (prev[o.id] || 0) + 1 }))
+    } else {
+      setPin(o.id, pin)
+    }
+  }
+
+  function toggleQuickAdd(id) {
+    setQuickAddId(prev => (prev === id ? null : id))
+  }
+
+  function expandObs(id) {
+    setCollapsedIds(prev => { const next = new Set(prev); next.delete(id); return next })
   }
 
   function setMapView(id, view) {
@@ -890,7 +930,24 @@ export default function App() {
             </div>
           )}
 
-          {obs.map((o, idx) => (
+          {obs.map((o, idx) => {
+            if (collapsedIds.has(o.id)) {
+              const rowInfo = o.pin && mapData ? findPinRow(mapData, o.pin) : null
+              return (
+                <div key={o.id} style={{ background: '#fff', border: '1px solid #d0d5e8', borderRadius: 10, padding: '9px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 7px', borderRadius: 20, background: sevBg[o.sev], color: sevColor[o.sev], flexShrink: 0 }}>{o.sev}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#222', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.cat}</span>
+                    {rowInfo && <span style={{ fontSize: 11, color: '#1a8a50', fontWeight: 700, flexShrink: 0 }}>rivi {rowInfo.label}</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, flexShrink: 0, alignItems: 'center' }}>
+                    <button onClick={() => expandObs(o.id)} style={{ background: 'none', border: 'none', color: '#1a2fcc', fontSize: 12, fontWeight: 700 }}>Avaa</button>
+                    <button onClick={() => removeObs(o.id)} style={{ background: 'none', border: 'none', color: '#6670a0', fontSize: 16 }}>🗑</button>
+                  </div>
+                </div>
+              )
+            }
+            return (
             <div key={o.id} style={{ background: '#fff', border: '1px solid #d0d5e8', borderRadius: 12, overflow: 'hidden' }}>
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', background: '#eef0f7', borderBottom: '1px solid #d0d5e8' }}>
@@ -956,7 +1013,7 @@ export default function App() {
                     <MapView
                       mapData={mapData}
                       pin={o.pin}
-                      onPin={pin => setPin(o.id, pin)}
+                      onPin={pin => handleMapTap(o, pin)}
                       gpsCoords={gpsCoords}
                       onViewChange={view => setMapView(o.id, view)}
                     />
@@ -968,6 +1025,22 @@ export default function App() {
                         </div>
                       ) : null
                     })()}
+                    {o.pin && (
+                      <div style={{ marginTop: 8 }}>
+                        {quickAddId === o.id ? (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: '#eafaf0', border: '1px solid #1a8a50', borderRadius: 8, padding: '8px 10px' }}>
+                            <span style={{ fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
+                              📍 Pikalisäys päällä{quickAddCounts[o.id] ? ` (${quickAddCounts[o.id]} lisätty)` : ''} — napauta karttaa lisätäksesi uusia samanlaisia havaintoja
+                            </span>
+                            <button onClick={() => toggleQuickAdd(o.id)} style={{ background: '#1a8a50', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>Lopeta</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => toggleQuickAdd(o.id)} style={{ width: '100%', padding: 9, border: '1px dashed #1a2fcc', borderRadius: 8, background: '#fff', color: '#1a2fcc', fontSize: 12, fontWeight: 600 }}>
+                            📍 Pikalisää useita samalle kartalle
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -995,7 +1068,8 @@ export default function App() {
                 </div>
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
 
         {/* Add button */}
