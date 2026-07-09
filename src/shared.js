@@ -88,12 +88,28 @@ export function findPinRow(mapData, pin) {
   //        välistä — tämä on tarkempi tapa tunnistaa nimenomaan tien
   //        ylitys erotuksena tavallisesta, isommastakin pöytävälistä
   //        (esim. huoltokäytävä rivin sisällä).
-  const yTol = th * 0.6
+  // HUOM: joillain työmailla rivit on aseteltu poikkeuksellisen lähekkäin
+  // pystysuunnassa (esim. tämä alue, jossa rivit 61/63/65 ja 70/72/74 ovat
+  // lähes päällekkäin kartalla). Liian väljä Y-toleranssi sekoitti tällöin
+  // eri fyysiset rivit samaksi ketjuksi. Toleranssi on siksi tiukka — vain
+  // saman rivin omien lohkojen pieni mittausvaihtelu, ei naapuririvin väli.
+  const yTol = th * 0.25
   const gapTol = 25 * sxm // reilusti isompi kuin tavallinen pöytäväli, jotta rivin sisäiset huoltokäytävät ym. eivät katkaise ketjua turhaan
   const rowY = hit.y + th / 2
-  const roadCrosses = (xA, xB) => {
+
+  // Tarkistaa kulkeeko jokin "raja-viiva" kahden lohkon välistä. Tähän
+  // lasketaan sekä tiet (mapData.roads) että aluerajat — dxfParser.js lukee
+  // DXF:n "Aluejako"-tason (eri numeroitujen alueiden väliset rajaviivat,
+  // esim. A5/A6-alueiden raja) samaan pvAreas-joukkoon kuin itse
+  // paneelialueiden ulkoreunat, koska molemmat ovat "alue"-tyyppisiä
+  // polygoneja DXF:ssä. Ilman tätä kaksi vierekkäistä mutta itsenäisesti
+  // numeroitua aluetta (esim. rivit 61/63/65 alueella A5 ja 70/72/74
+  // alueella A6) saattoivat ketjuuntua samaksi riviksi, koska niiden
+  // välissä oleva aluerajaviiva ei ollut "tie" eikä siis pysäyttänyt ketjua.
+  const boundaryPolylines = [...mapData.roads, ...mapData.pvAreas]
+  const crossesBoundary = (xA, xB) => {
     const lo = Math.min(xA, xB), hi = Math.max(xA, xB)
-    return mapData.roads.some(pts => {
+    return boundaryPolylines.some(pts => {
       for (let i = 0; i < pts.length - 1; i++) {
         const [x1, y1] = pts[i], [x2, y2] = pts[i + 1]
         if ((y1 - rowY) * (y2 - rowY) > 0) continue // segmentti ei ylitä rivin Y-tasoa
@@ -115,12 +131,12 @@ export function findPinRow(mapData, pin) {
   const chain = [sameY[hitPos]]
   for (let i = hitPos - 1; i >= 0; i--) {
     const edge = chain[0].left
-    if (sameY[i].right >= edge - gapTol && !roadCrosses(sameY[i].right, edge)) chain.unshift(sameY[i])
+    if (sameY[i].right >= edge - gapTol && !crossesBoundary(sameY[i].right, edge)) chain.unshift(sameY[i])
     else break
   }
   for (let i = hitPos + 1; i < sameY.length; i++) {
     const edge = chain[chain.length - 1].right
-    if (sameY[i].left <= edge + gapTol && !roadCrosses(edge, sameY[i].left)) chain.push(sameY[i])
+    if (sameY[i].left <= edge + gapTol && !crossesBoundary(edge, sameY[i].left)) chain.push(sameY[i])
     else break
   }
 
@@ -131,10 +147,15 @@ export function findPinRow(mapData, pin) {
 
   // 4. Etsi lähin numerolappu VAIN saman Y-kaistan sisältä, ja hylkää jos
   //    lähinkin on epäuskottavan kaukana (esim. toiselta puolelta karttaa).
+  //    Numerolapun oma Y-toleranssi on tarkoituksella löysempi kuin rivin
+  //    ketjutuksen yTol yllä — labelin tekstianckeri ei aina osu tasan
+  //    pöydän keskikohtaan, mutta silti on selvästi lähempänä omaa riviään
+  //    kuin naapuririviä.
+  const labelYTol = th * 0.6
   const maxLabelDist = th * 4 // n. rivin syvyyden nelinkertainen etäisyys riittää kattamaan reunan epätarkkuudet
   let best = Infinity, label = null
   mapData.rowNumbers.forEach(t => {
-    if (Math.abs(t.y - targetY) > yTol * 1.5) return // eri Y-kaista → ei voi olla saman rivin numero
+    if (Math.abs(t.y - targetY) > labelYTol) return // eri Y-kaista → ei voi olla saman rivin numero
     const d = Math.hypot(t.x - targetX, t.y - targetY)
     if (d < best) { best = d; label = t.text }
   })
