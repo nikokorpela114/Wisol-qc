@@ -298,10 +298,17 @@ export function renderGroupMapImage(mapData, items) {
     if (ins.y > maxY) maxY = ins.y
   })
 
-  // Small, mostly fixed margin now — the crop width is already driven by
-  // the row's real extent, not by guesswork padding.
-  const padX = Math.max(6 * sxm, (maxX - minX) * 0.05)
-  const padY = Math.max(9 * sym, (maxY - minY) * 0.2)
+  // Aiemmin marginaali oli hyvin pieni (5 % / kiinteä 6 yksikköä), jolloin
+  // rajaus näytti VAIN itse pisteiden rivin ilman mitään ympäröivää
+  // kontekstia — asentajan oli mahdotonta hahmottaa mihin kohtaan koko
+  // riviä tai työmaata tämä pätkä sijoittuu, koska yhtään naapuririvin
+  // numerolappua ei näkynyt vertailukohdaksi. Pystysuunnassa marginaali on
+  // nyt sidottu pöydän syvyyteen (th) niin että ainakin osa rivin ylä- ja
+  // alapuolisesta naapuririvistä (numerolappuineen) jää aina näkyviin,
+  // vaakasuunnassa marginaali on reilusti suurempi jotta rivin päät/jatko
+  // hahmottuvat paremmin.
+  const padX = Math.max(40 * sxm, (maxX - minX) * 0.15)
+  const padY = Math.max(th * 1.8, (maxY - minY) * 0.35)
   const svgX0 = Math.max(0, minX - padX)
   const svgY0 = Math.max(0, minY - padY)
   const svgX1 = Math.min(mapData.W, maxX + padX)
