@@ -188,7 +188,24 @@ export function findPinRow(mapData, pin) {
     const d = Math.hypot(t.x - targetX, t.y - targetY)
     if (d < best) { best = d; label = t.text }
   })
-  if (!label || best > maxLabelDist) return null
+  // Fallback: jos tiukka Y-kaista ei löydä yhtään lappua (esim. label on
+  // hieman odotettua kauempana Y-suunnassa jollain työmaalla), etsitään
+  // lähin lappu ILMAN Y-kaistarajoitusta mutta silti maxLabelDist-säteen
+  // sisältä — parempi näyttää lähin uskottava numero kuin ei mitään.
+  if (!label || best > maxLabelDist) {
+    let best2 = Infinity, label2 = null
+    mapData.rowNumbers.forEach(t => {
+      const d = Math.hypot(t.x - targetX, t.y - targetY)
+      if (d < best2) { best2 = d; label2 = t.text }
+    })
+    console.log('[findPinRow debug: label-haku epäonnistui tiukalla kaistalla]', {
+      targetX, targetY, labelYTol, maxLabelDist,
+      strictBest: best, strictLabel: label,
+      fallbackBest: best2, fallbackLabel: label2,
+    })
+    if (label2 && best2 <= maxLabelDist * 1.5) { best = best2; label = label2 }
+  }
+  if (!label || best > maxLabelDist * 1.5) return null
 
   // Palautetaan myös koko rivin (ketjun) lohkojen indeksit — näitä tarvitaan
   // kun halutaan korostaa/rajata koko rivi eikä vain sitä yhtä lohkoa johon
