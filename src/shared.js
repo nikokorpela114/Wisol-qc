@@ -207,6 +207,13 @@ export function findPinRow(mapData, pin) {
     const d = Math.hypot(t.x - targetX, t.y - targetY)
     if (d < best) { best = d; label = t.text }
   })
+  // TILAPÄINEN DEBUG
+  console.log('[findPinRow] pin=(' + psx.toFixed(1) + ',' + psy.toFixed(1) + ') hitIdx=' + hitIdx +
+    ' hit=(' + hit.x.toFixed(1) + ',' + hit.y.toFixed(1) + ') chainLen=' + chain.length +
+    ' chainX=[' + chain.map(e => e.left.toFixed(0) + '-' + e.right.toFixed(0)).join(',') + ']' +
+    ' targetX=' + targetX.toFixed(1) + ' targetY=' + targetY.toFixed(1) +
+    ' localPitch=' + localPitch.toFixed(2) + ' labelYTol=' + labelYTol.toFixed(2) +
+    ' -> label=' + label + ' dist=' + best.toFixed(2))
   // Fallback: jos tiukka Y-kaista ei löydä yhtään lappua (esim. label on
   // hieman odotettua kauempana Y-suunnassa jollain työmaalla), etsitään
   // lähin lappu ILMAN Y-kaistarajoitusta mutta silti maxLabelDist-säteen
@@ -217,14 +224,6 @@ export function findPinRow(mapData, pin) {
       const d = Math.hypot(t.x - targetX, t.y - targetY)
       if (d < best2) { best2 = d; label2 = t.text }
     })
-    const nearest5 = mapData.rowNumbers
-      .map(t => ({ text: t.text, x: t.x, y: t.y, d: Math.hypot(t.x - targetX, t.y - targetY), dy: t.y - targetY }))
-      .sort((a, b) => a.d - b.d)
-      .slice(0, 6)
-    console.log('[findPinRow debug] targetX=' + targetX.toFixed(1) + ' targetY=' + targetY.toFixed(1) + ' labelYTol=' + labelYTol.toFixed(1) + ' maxLabelDist=' + maxLabelDist.toFixed(1))
-    console.log('[findPinRow debug] strictBest=' + best + ' strictLabel=' + label + ' fallbackBest=' + best2.toFixed(1) + ' fallbackLabel=' + label2)
-    console.log('[findPinRow debug] lähimmät 6 numerolappua (text, x, y, etäisyys d, Y-ero dy):')
-    nearest5.forEach(n => console.log('  ' + n.text + '  x=' + n.x.toFixed(1) + ' y=' + n.y.toFixed(1) + ' d=' + n.d.toFixed(1) + ' dy=' + n.dy.toFixed(1)))
     if (label2 && best2 <= maxLabelDist * 1.5) { best = best2; label = label2 }
   }
   if (!label || best > maxLabelDist * 1.5) return null
