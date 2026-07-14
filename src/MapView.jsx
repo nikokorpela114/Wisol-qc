@@ -200,20 +200,51 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     y: p.y * H * transform.scale + transform.ty
   }))
 
+  // Row-number label sizing + overlap prevention.
+  //
+  // Aiempi versio (scaledFontSize = clamp(7,14, 10/scale)) laski koon
+  // väärään suuntaan: koska koko <svg> on jo CSS-skaalattu
+  // scale(transform.scale):lla, tämä paikallinen koko kerrottui vielä
+  // sillä samalla luvulla, jolloin lähelle zoomatessa numerot paisuivat
+  // jättimäisiksi ja kauas zoomatessa lähes näkymättömiin, minkä lisäksi
+  // tausta-laatikko (kiinteä koko) ja teksti (vaihtuva koko) ajautuivat
+  // erilleen toisistaan.
+  //
+  // HUOM: aiemmin kokeiltiin korjata tätä kääräisemällä jokainen numero
+  // omaan <g transform="scale(...)">:iin, mutta se aiheutti UUDEN,
+  // vakavamman ongelman: osa selaimista (etenkin mobiili-Safari) piirtää
+  // SVG-tekstin rosoisena/epäselvänä kun se on transform-skaalattu, koska
+  // glyfit lasketaan ensin ja venytetään/kutistetaan vasta sen jälkeen
+  // matriisilla — sen sijaan että kirjasin piirrettäisiin suoraan oikean
+  // kokoisena. Siksi `fontSize` lasketaan nyt SUORAAN oikeaksi paikalliseksi
+  // lukuarvoksi (kuten alkuperäisessä koodissa), ei enää transform-temppuna:
+  // `k` on kerroin joka vastaa sitä, kuinka paljon isompi/pienempi haluttu
+  // näyttökoko on alkuperäiseen 10px-suunnitteluun nähden, ja sillä
+  // skaalataan sekä fontSize että tausta-laatikon mitat samassa suhteessa
+  // kuin alkuperäinen 16×10-laatikko + fontSize 10 -asettelu käytti.
+  //
+  // Pelkkä kiinteä näyttökoko ei silti riitä: kun zoomaa hyvin kauas,
+  // rivien välinen etäisyys RUUDULLA pienenee, ja jos numerolaatikot
+  // pysyvät silti kiinteän kokoisina, ne alkavat mennä päällekkäin ja
+  // sekoittua toisiinsa (juuri tämä aiheutti sotkun). Siksi numerot
+  // piilotetaan kokonaan kun rivien väli ruudulla olisi pienempi kuin mitä
+  // yksi laatikko tarvitsee — sama periaate kuin tavallisissa
+  // karttasovelluksissa, joissa nimet ilmestyvät vasta tarpeeksi läheltä
+  // zoomattuna.
+  const scaleYm = H / (maxY - minY)
+  const rowSpacingPx = TABLE_DEPTH_M * scaleYm * transform.scale
+  const desiredLabelPx = Math.max(11, Math.min(20, 11 + Math.log2(Math.max(0.5, transform.scale)) * 4))
+  const showRowLabels = rowSpacingPx > desiredLabelPx * 1.5
+  const labelK = desiredLabelPx / 10 / transform.scale   // skaalauskerroin alkup. 10px-suunnitteluun nähden, paikallisissa SVG-yksiköissä
+  const labelFontSize = 10 * labelK
+  const labelBoxHalfW = 8 * labelK
+  const labelBoxHalfH = 8 * labelK
+  const labelBoxW = 16 * labelK
+  const labelBoxH = 10 * labelK
+  const labelRx = 1 * labelK
+
   // Scale for text readability
   const strokeW = Math.max(0.3, 1 / transform.scale)
-
-  // Desired ON-SCREEN pixel height for row-number labels. Rivinumerot
-  // renderöidään omassa g-elementissään käänteisellä skaalauksella (ks.
-  // alempana), joten tämä arvo on suoraan se pikselikoko joka näkyy
-  // ruudulla riippumatta kartan zoomista. Vanha `scaledFontSize` oli
-  // väärään suuntaan laskettu (10/scale suoraan map-avaruudessa), mikä
-  // yhdistettynä SVG:n omaan CSS-skaalaukseen sai numerot paisumaan
-  // jättimäisiksi lähelle zoomatessa ja lähes näkymättömiin kauas
-  // zoomatessa (tausta-laatikko ei enää osunut tekstin päälle). Tämä
-  // kasvaa maltillisesti zoomatessa lähemmäs (log2-asteikolla), mutta ei
-  // koskaan mene alle luettavan minimin kun zoomataan kauas.
-  const desiredLabelPx = Math.max(11, Math.min(20, 11 + Math.log2(Math.max(0.5, transform.scale)) * 4))
 
   return (
     <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', background: '#eef4ec', height: typeof height === 'string' ? '100%' : undefined, display: typeof height === 'string' ? 'flex' : undefined, flexDirection: typeof height === 'string' ? 'column' : undefined }}>
@@ -299,22 +330,27 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             )
           })}
 
-          {/* Row numbers - white bg for legibility */}
-          {rowNumbers.map((t, i) => (
-            <g key={`t${i}`} transform={`translate(${t.x}, ${t.y}) scale(${desiredLabelPx / 10 / transform.scale})`}>
+          {/* Row numbers - white bg for legibility. Piilossa kun rivit
+              olisivat liian lähekkäin ruudulla (ks. showRowLabels yllä).
+              fontSize ja laatikon mitat lasketaan suoraan oikeiksi
+              paikallisiksi lukuarvoiksi (ei transform-scale-koukkua),
+              koska transform-skaalattu SVG-teksti renderöityy rosoisena
+              osalla selaimista. */}
+          {showRowLabels && rowNumbers.map((t, i) => (
+            <g key={`t${i}`}>
               <rect
-                x={-8}
-                y={-8}
-                width={16}
-                height={10}
+                x={t.x - labelBoxHalfW}
+                y={t.y - labelBoxHalfH}
+                width={labelBoxW}
+                height={labelBoxH}
                 fill="white"
                 fillOpacity={0.75}
-                rx={1}
+                rx={labelRx}
               />
               <text
-                x={0}
-                y={0}
-                fontSize={10}
+                x={t.x}
+                y={t.y}
+                fontSize={labelFontSize}
                 fill="#0d1a6e"
                 fontFamily="sans-serif"
                 fontWeight="bold"
