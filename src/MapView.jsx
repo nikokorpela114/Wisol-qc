@@ -280,6 +280,11 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             const scaleYm = H / (maxY - minY)
             const tw = ins.panels * PANEL_W_M * scaleXm
             const th = TABLE_DEPTH_M * scaleYm
+            // HUOM: block-nimen "@30DEG" on paneelin ASENNUS-/KALLISTUSKULMA
+            // (kuinka jyrkässä kulmassa paneeli on aurinkoon nähden), EI
+            // pöydän kiertoa pohjapiirroksen X/Y-tasossa. Tämä tulkittiin
+            // aiemmin virheellisesti tasokierroksi, mikä siirsi/limitti
+            // pöytiä väärin — siksi ins.rot:ia EI käytetä piirrossa.
             return (
               <rect
                 key={`ins${i}`}

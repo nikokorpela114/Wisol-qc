@@ -35,6 +35,15 @@ export const CAT_EN = {
 }
 export const SEV_EN = { Kriittinen: 'Critical', Huomio: 'Attention', Info: 'Info' }
 
+// HUOM: dxfParser.js tallentaa jokaiselle INSERT:lle ins.rot-kentän
+// block-nimen "@30DEG"-osasta (esim. "2P22@30DEG..."). Tämä EI ole
+// pöydän kierto pohjapiirroksen X/Y-tasossa — se on paneelin
+// asennus-/kallistuskulma (tuttu esim. "30 asteen kallistus" aurinko-
+// paneeliasennuksista), joka ei vaikuta pöydän sijaintiin tai muotoon
+// ylhäältä katsottuna. Tätä kokeiltiin virheellisesti tulkita tasokiertona
+// kerran, mikä siirsi/limitti kaikki 1051 pöytää väärin — ins.rot:ia ei
+// siis käytetä missään piirrossa tai osumatunnistuksessa.
+
 export const PDF_STR = {
   fi: {
     title: 'Laadunvalvontaraportti', site: 'Työmaa', inspector: 'Tarkastaja', rivi: 'Rivi / alue',
@@ -67,7 +76,8 @@ export function findPinRow(mapData, pin) {
   const psx = pin.x * mapData.W, psy = pin.y * mapData.H
   const th = TABLE_DEPTH_M * sym
 
-  // 1. Etsi insert-lohko johon pinni osuu
+  // 1. Etsi insert-lohko johon pinni osuu. (HUOM: ins.rot ei ole pöydän
+  //    pohjapiirroskierto vaan paneelin kallistuskulma — ei käytetä tässä.)
   let hitIdx = -1
   mapData.inserts.forEach((ins, idx) => {
     const tw = ins.panels * PANEL_W_M * sxm
@@ -89,16 +99,6 @@ export function findPinRow(mapData, pin) {
       const center = ins.y - th / 2
       const d = Math.abs(psy - center)
       if (d < bestDist) { bestDist = d; hitIdx = idx }
-    })
-    // TILAPÄINEN DEBUG — poistetaan kun ongelma on ratkaistu. Näyttää
-    // konsolissa tarkat luvut kun tarkka osuma epäonnistuu, jotta nähdään
-    // oikeasti mikä menee pieleen sen sijaan että arvataan.
-    console.log('[findPinRow debug]', {
-      psx, psy, th,
-      bestDist, hitIdxAfterFallback: hitIdx,
-      insertsNearX: mapData.inserts
-        .map((ins, idx) => ({ idx, x: ins.x, y: ins.y, tw: ins.panels * PANEL_W_M * sxm }))
-        .filter(e => psx >= e.x - 3 && psx <= e.x + e.tw + 3)
     })
     if (bestDist > th * 1.2) hitIdx = -1 // liian kaukana ollakseen luotettava arvaus
   }
