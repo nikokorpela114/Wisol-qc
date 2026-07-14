@@ -123,7 +123,13 @@ export function findPinRow(mapData, pin) {
   // eri fyysiset rivit samaksi ketjuksi. Toleranssi on siksi tiukka — vain
   // saman rivin omien lohkojen pieni mittausvaihtelu, ei naapuririvin väli.
   const yTol = th * 0.25
-  const gapTol = 25 * sxm // reilusti isompi kuin tavallinen pöytäväli, jotta rivin sisäiset huoltokäytävät ym. eivät katkaise ketjua turhaan
+  // HUOM: alkuperäinen 25 m oli aivan liian löysä tiheämmin aseteltuja
+  // pöytälohkoja varten (esim. ~20-25 m levyiset lohkot tällä alueella) —
+  // se ketjutti todellisuudessa useita ERI rivejä yhdeksi jättiketjuksi
+  // (havaittu: 60 yksikön sijaintiero riitti tuottamaan 1 vs 6 lohkon
+  // ketjun ja täysin eri "Havaittu rivi" -tuloksen). Pienennetty selvästi
+  // realistisemmaksi huoltokäytävän levyiseksi väliksi.
+  const gapTol = 6 * sxm
   const rowY = hit.y - th / 2
 
   // Tarkistaa kulkeeko jokin "raja-viiva" kahden lohkon välistä. Tähän
@@ -160,12 +166,17 @@ export function findPinRow(mapData, pin) {
   const chain = [sameY[hitPos]]
   for (let i = hitPos - 1; i >= 0; i--) {
     const edge = chain[0].left
-    if (sameY[i].right >= edge - gapTol && !crossesBoundary(sameY[i].right, edge)) chain.unshift(sameY[i])
+    const gap = edge - sameY[i].right
+    // gap < -1: lohkot ovat selvästi päällekkäin (esim. DXF:n duplikoitu/
+    // limittyvä data) — ei ketjuteta tällaisen läpi, koska se on merkki
+    // datavirheestä eikä oikeasta rivin jatkosta.
+    if (gap >= -1 && gap <= gapTol && !crossesBoundary(sameY[i].right, edge)) chain.unshift(sameY[i])
     else break
   }
   for (let i = hitPos + 1; i < sameY.length; i++) {
     const edge = chain[chain.length - 1].right
-    if (sameY[i].left <= edge + gapTol && !crossesBoundary(edge, sameY[i].left)) chain.push(sameY[i])
+    const gap = sameY[i].left - edge
+    if (gap >= -1 && gap <= gapTol && !crossesBoundary(edge, sameY[i].left)) chain.push(sameY[i])
     else break
   }
 
