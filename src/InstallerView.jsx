@@ -1,9 +1,10 @@
 // src/InstallerView.jsx
 import React, { useState, useEffect, useRef, useMemo } from 'react'
+import MapView from './MapView.jsx'
 import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
-import { KNOWN_SITES, findPinRow, renderPinMapThumb, CAT_EN, SEV_EN } from './shared.js'
+import { KNOWN_SITES, renderGroupMapImage, CAT_EN, SEV_EN } from './shared.js'
 import { subscribeToPush, sendPushNotification } from './push.js'
 
 const SESSION_KEY = 'wisol_installer_session'
@@ -25,6 +26,11 @@ export default function InstallerView() {
   const [gpsCoords, setGpsCoords] = useState(null)
   const [pushMsg, setPushMsg] = useState('')
   const [fixedBatch, setFixedBatch] = useState([]) // korjatut mutta ei vielä kuitatut asentajan istunnossa
+  // Vain YHDEN tehtävän kartta voi olla auki interaktiivisena kerrallaan —
+  // tämä pitää muistinkäytön kurissa vaikka avoimia tehtäviä olisi
+  // kymmeniä (ks. aiempi kaatumisbugi, joka johtui liian monesta yhtäaikaa
+  // auki olevasta raskaasta MapView-komponentista).
+  const [expandedGroupKey, setExpandedGroupKey] = useState(null)
   const [confirmMsg, setConfirmMsg] = useState('')
 
   const t = key => {
@@ -124,20 +130,31 @@ export default function InstallerView() {
   }
   useEffect(() => { loadTasks() }, [session])
 
-  // Pre-render a small STATIC map snapshot per task (once, memoized) instead
-  // of mounting a full interactive <MapView> for every open task. With many
-  // open tasks this used to mount that many live SVG maps with touch/mouse
-  // listeners at once, which was heavy enough to crash mobile Safari
-  // ("Toistuva ongelma verkkosivulla"). Only recomputes when the task list
-  // or the map data actually changes.
-  const thumbById = useMemo(() => {
-    const map = new Map()
-    if (!mapData || !tasks) return map
+  // Ryhmitellään avoimet tehtävät vikatyypin (ja työmaan) mukaan, ja
+  // piirretään JOKAISELLE RYHMÄLLE yksi yhteinen karttakuva jossa kaikki
+  // saman vian pinnit näkyvät numeroituina — sama periaate kuin PDF:n
+  // "Yhdistä samat vikatyypit samaan karttakuvaan". Ilman tätä jokainen
+  // tehtävä sai oman erillisen kartan, mikä oli sekä hidasta (raskas
+  // piirto per tehtävä) että hankalaa käyttää kun samaa vikaa oli merkitty
+  // kymmeniä kertoja peräkkäin samalle riville.
+  const taskGroups = useMemo(() => {
+    if (!mapData || !tasks) return []
+    const groups = new Map()
     tasks.forEach(o => {
-      if (o.pin_x == null) return
-      try { map.set(o.id, renderPinMapThumb(mapData, { x: o.pin_x, y: o.pin_y })) } catch (e) { console.error('thumb render failed:', e) }
+      const key = `${o.cat}__${o.site || ''}`
+      if (!groups.has(key)) groups.set(key, { cat: o.cat, site: o.site, items: [] })
+      groups.get(key).items.push(o)
     })
-    return map
+    return [...groups.values()].map(g => {
+      const withPin = g.items.filter(o => o.pin_x != null)
+      let mapImg = null
+      if (withPin.length > 0) {
+        try {
+          mapImg = renderGroupMapImage(mapData, withPin.map(o => ({ ...o, pin: { x: o.pin_x, y: o.pin_y } })))
+        } catch (e) { console.error('group map render failed:', e) }
+      }
+      return { ...g, withPin, mapImg }
+    })
   }, [mapData, tasks])
 
   // Figure out which site's map to show — first distinct site among open tasks
@@ -263,42 +280,57 @@ export default function InstallerView() {
         {tasks === null && <div style={{ textAlign: 'center', color: '#6670a0', padding: 40 }}>{t('loading')}</div>}
         {tasks && tasks.length === 0 && <div style={{ textAlign: 'center', color: '#6670a0', padding: 40 }}>{t('noTasks')}</div>}
 
-        {tasks && tasks.map(o => {
-          const catLabel = lang === 'en' ? (CAT_EN[o.cat] || o.cat) : o.cat
-          const sevLabel = lang === 'en' ? (SEV_EN[o.sev] || o.sev) : o.sev
-          const rowInfo = mapData && o.pin_x != null ? findPinRow(mapData, { x: o.pin_x, y: o.pin_y }) : null
+        {tasks && taskGroups.map(g => {
+          const catLabel = lang === 'en' ? (CAT_EN[g.cat] || g.cat) : g.cat
+          const groupKey = g.cat + '__' + (g.site || '')
           return (
-            <div key={o.id} style={{ background: '#fff', borderRadius: 12, border: '1px solid #d0d5e8', marginBottom: 12, overflow: 'hidden' }}>
+            <div key={groupKey} style={{ background: '#fff', borderRadius: 12, border: '1px solid #d0d5e8', marginBottom: 12, overflow: 'hidden' }}>
               <div style={{ padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eef0f7' }}>
                 <span style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e' }}>{catLabel}</span>
-                <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: sevBg[o.sev], color: sevColor[o.sev] }}>{sevLabel}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#6670a0' }}>{g.items.length} {lang === 'en' ? 'items' : 'kpl'}</span>
               </div>
-              {o.note && <div style={{ padding: '8px 14px 0', fontSize: 13, color: '#333' }}>{o.note}</div>}
-              {o.site && <div style={{ padding: '4px 14px 0', fontSize: 11, color: '#9aa2c0' }}>{o.site}</div>}
+              {g.site && <div style={{ padding: '6px 14px 0', fontSize: 11, color: '#9aa2c0' }}>{g.site}</div>}
 
-              {mapData && o.pin_x != null && (
+              {g.mapImg && (
                 <div style={{ padding: 12 }}>
-                  {thumbById.has(o.id) ? (
+                  <div style={{ position: 'relative' }} onClick={() => setExpandedGroupKey(groupKey)}>
                     <img
-                      src={thumbById.get(o.id)}
+                      src={g.mapImg.dataUrl}
                       alt=""
-                      style={{ width: '100%', display: 'block', borderRadius: 8, border: '1px solid #d0d5e8' }}
+                      style={{ width: '100%', display: 'block', borderRadius: 8, border: '1px solid #d0d5e8', cursor: 'pointer' }}
                     />
-                  ) : (
-                    <div style={{ height: 160, background: '#eef4ec', borderRadius: 8 }} />
-                  )}
-                  {rowInfo && (
-                    <div style={{ marginTop: 4, fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
-                      📍 {t('row')}: {rowInfo.label}
+                    <div style={{ position: 'absolute', bottom: 6, right: 6, background: 'rgba(13,26,110,0.75)', color: '#fff', fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 20 }}>
+                      🔍 {lang === 'en' ? 'Tap to zoom' : 'Zoomaa napauttamalla'}
                     </div>
-                  )}
+                  </div>
                 </div>
               )}
 
-              <div style={{ padding: 12, paddingTop: 0 }}>
-                <button onClick={() => markFixed(o)} style={{ width: '100%', padding: 12, background: '#1a8a50', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14 }}>
-                  {t('markFixed')}
-                </button>
+              <div>
+                {g.items.map(o => {
+                  const sevLabel = lang === 'en' ? (SEV_EN[o.sev] || o.sev) : o.sev
+                  const pinIdx = g.withPin.indexOf(o)
+                  const rowLabel = pinIdx >= 0 && g.mapImg ? g.mapImg.rowLabels[pinIdx] : null
+                  return (
+                    <div key={o.id} style={{ padding: '10px 14px', borderTop: '1px solid #f0f1f7', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                          {pinIdx >= 0 && (
+                            <span style={{ width: 20, height: 20, borderRadius: '50%', background: '#d63030', color: '#fff', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              {pinIdx + 1}
+                            </span>
+                          )}
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: sevBg[o.sev], color: sevColor[o.sev], flexShrink: 0 }}>{sevLabel}</span>
+                          {rowLabel && <span style={{ fontSize: 12, color: '#1a8a50', fontWeight: 700, whiteSpace: 'nowrap' }}>{t('row')} {rowLabel}</span>}
+                        </div>
+                        <button onClick={() => markFixed(o)} style={{ padding: '7px 14px', background: '#1a8a50', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 12.5, flexShrink: 0 }}>
+                          {t('markFixed')}
+                        </button>
+                      </div>
+                      {o.note && <div style={{ fontSize: 12.5, color: '#333' }}>{o.note}</div>}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )
@@ -316,6 +348,38 @@ export default function InstallerView() {
           {confirmMsg && <div style={{ textAlign: 'center', fontSize: 12, color: '#1a8a50', fontWeight: 600, marginTop: 6 }}>{confirmMsg}</div>}
         </div>
       )}
+      {/* Täysikokoinen interaktiivinen kartta — vain YKSI ryhmä kerrallaan
+          koko näkymässä riippumatta siitä montako tehtävää listassa on,
+          jotta muistinkäyttö ei koskaan karkaa käsistä (ks. kaatumisbugin
+          korjaus). Näyttää koko ryhmän kaikki pinnit yhtä aikaa. */}
+      {expandedGroupKey && mapData && (() => {
+        const group = taskGroups.find(g => (g.cat + '__' + (g.site || '')) === expandedGroupKey)
+        if (!group || group.withPin.length === 0) return null
+        const [first, ...rest] = group.withPin
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 100, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '12px 14px', background: '#1a2fcc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#fff', fontWeight: 700, fontSize: 14 }}>
+                {lang === 'en' ? (CAT_EN[group.cat] || group.cat) : group.cat} ({group.withPin.length})
+              </span>
+              <button onClick={() => setExpandedGroupKey(null)} style={{ background: 'rgba(255,255,255,0.18)', border: 'none', color: '#fff', borderRadius: 8, padding: '7px 14px', fontSize: 13, fontWeight: 700 }}>
+                ✕ {lang === 'en' ? 'Close' : 'Sulje'}
+              </button>
+            </div>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <MapView
+                mapData={mapData}
+                pin={{ x: first.pin_x, y: first.pin_y }}
+                extraPins={rest.map(o => ({ x: o.pin_x, y: o.pin_y }))}
+                onPin={() => {}}
+                gpsCoords={gpsCoords}
+                height="100%"
+                readOnly
+              />
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
