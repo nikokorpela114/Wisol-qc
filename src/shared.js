@@ -90,6 +90,16 @@ export function findPinRow(mapData, pin) {
       const d = Math.abs(psy - center)
       if (d < bestDist) { bestDist = d; hitIdx = idx }
     })
+    // TILAPÄINEN DEBUG — poistetaan kun ongelma on ratkaistu. Näyttää
+    // konsolissa tarkat luvut kun tarkka osuma epäonnistuu, jotta nähdään
+    // oikeasti mikä menee pieleen sen sijaan että arvataan.
+    console.log('[findPinRow debug]', {
+      psx, psy, th,
+      bestDist, hitIdxAfterFallback: hitIdx,
+      insertsNearX: mapData.inserts
+        .map((ins, idx) => ({ idx, x: ins.x, y: ins.y, tw: ins.panels * PANEL_W_M * sxm }))
+        .filter(e => psx >= e.x - 3 && psx <= e.x + e.tw + 3)
+    })
     if (bestDist > th * 1.2) hitIdx = -1 // liian kaukana ollakseen luotettava arvaus
   }
   if (hitIdx < 0) return null
