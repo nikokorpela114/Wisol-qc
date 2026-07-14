@@ -73,6 +73,25 @@ export function findPinRow(mapData, pin) {
     const tw = ins.panels * PANEL_W_M * sxm
     if (psx >= ins.x - 3 && psx <= ins.x + tw + 3 && psy >= ins.y - th - 3 && psy <= ins.y + 3) hitIdx = idx
   })
+  // Fallback: joillain työmailla rivit on aseteltu hyvin tiheään (ks.
+  // kommentti alempana "rivit 61/63/65 lähes päällekkäin"), jolloin
+  // napautus voi osua muutaman pikselin päähän kahden pöydän välisestä
+  // rajasta eikä täsmällinen ±3 yksikön tarkistus löydä mitään —
+  // "Havaittu rivi" katosi tällöin kokonaan sen sijaan että olisi näyttänyt
+  // lähimmän, todennäköisesti oikean rivin. Jos tarkkaa osumaa ei löydy,
+  // valitaan lähin pöytä (X-suunnassa napautuksen kohdalla oleva, Y-etäisyys
+  // pienin) kohtuullisen etäisyyden sisältä sen sijaan että luovutetaan.
+  if (hitIdx < 0) {
+    let bestDist = Infinity
+    mapData.inserts.forEach((ins, idx) => {
+      const tw = ins.panels * PANEL_W_M * sxm
+      if (psx < ins.x - 3 || psx > ins.x + tw + 3) return // X-suunnassa oltava edes lähellä pöytää
+      const center = ins.y - th / 2
+      const d = Math.abs(psy - center)
+      if (d < bestDist) { bestDist = d; hitIdx = idx }
+    })
+    if (bestDist > th * 1.2) hitIdx = -1 // liian kaukana ollakseen luotettava arvaus
+  }
   if (hitIdx < 0) return null
   const hit = mapData.inserts[hitIdx]
 
