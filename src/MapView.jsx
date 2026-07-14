@@ -226,15 +226,22 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
   // Pelkkä kiinteä näyttökoko ei silti riitä: kun zoomaa hyvin kauas,
   // rivien välinen etäisyys RUUDULLA pienenee, ja jos numerolaatikot
   // pysyvät silti kiinteän kokoisina, ne alkavat mennä päällekkäin ja
-  // sekoittua toisiinsa (juuri tämä aiheutti sotkun). Siksi numerot
-  // piilotetaan kokonaan kun rivien väli ruudulla olisi pienempi kuin mitä
-  // yksi laatikko tarvitsee — sama periaate kuin tavallisissa
-  // karttasovelluksissa, joissa nimet ilmestyvät vasta tarpeeksi läheltä
-  // zoomattuna.
+  // sekoittua toisiinsa (juuri tämä aiheutti sotkun). Siksi numeron koko
+  // sidotaan suoraan TODELLISEEN rivien väliin ruudulla (rowSpacingPx),
+  // ei mihinkään zoomista irralliseen kaavaan — aiempi
+  // "11 + log2(scale)*4" -kaava ja sen 1.5x-piilotuskynnys eivät liittyneet
+  // rivien väliin mitenkään, joten se piilotti numerot lähes aina, myös
+  // ihan tavallisella oletuszoomilla. Nyt: koko kasvaa suoraan rivien
+  // välin mukana (max 20px), ja numerot piilotetaan VAIN jos edes 9px
+  // (pienin vielä luettava koko) ei mahtuisi ilman päällekkäisyyttä —
+  // sama periaate kuin tavallisissa karttasovelluksissa, joissa nimet
+  // ilmestyvät heti kun tilaa on edes vähän ja katoavat vasta kun rivit
+  // ovat oikeasti aivan liian lähekkäin.
   const scaleYm = H / (maxY - minY)
   const rowSpacingPx = TABLE_DEPTH_M * scaleYm * transform.scale
-  const desiredLabelPx = Math.max(11, Math.min(20, 11 + Math.log2(Math.max(0.5, transform.scale)) * 4))
-  const showRowLabels = rowSpacingPx > desiredLabelPx * 1.5
+  const rawLabelPx = rowSpacingPx * 0.8   // 0.8 = pieni marginaali ettei laatikko osu naapuririvin laatikkoon kiinni
+  const showRowLabels = rawLabelPx >= 9
+  const desiredLabelPx = Math.min(20, Math.max(9, rawLabelPx))
   const labelK = desiredLabelPx / 10 / transform.scale   // skaalauskerroin alkup. 10px-suunnitteluun nähden, paikallisissa SVG-yksiköissä
   const labelFontSize = 10 * labelK
   const labelBoxHalfW = 8 * labelK
