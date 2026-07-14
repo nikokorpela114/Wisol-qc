@@ -449,6 +449,7 @@ export default function App() {
       const clone = {
         id, cat: o.cat, sev: o.sev, note: '', muu: o.muu, photos: [],
         pin, db_id: null, createdAt: new Date().toISOString(),
+        clonedFrom: o.id,
       }
       setObs(prev => [...prev, clone])
       saveObs(clone, site, inspector, rivi)
@@ -1016,6 +1017,7 @@ export default function App() {
                       onPin={pin => handleMapTap(o, pin)}
                       gpsCoords={gpsCoords}
                       onViewChange={view => setMapView(o.id, view)}
+                      extraPins={quickAddId === o.id ? obs.filter(x => x.clonedFrom === o.id).map(x => x.pin) : []}
                     />
                     {o.pin && (() => {
                       const r = findPinRow(mapData, o.pin)
