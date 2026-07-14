@@ -71,7 +71,7 @@ export function findPinRow(mapData, pin) {
   let hitIdx = -1
   mapData.inserts.forEach((ins, idx) => {
     const tw = ins.panels * PANEL_W_M * sxm
-    if (psx >= ins.x - 3 && psx <= ins.x + tw + 3 && psy >= ins.y - 3 && psy <= ins.y + th + 3) hitIdx = idx
+    if (psx >= ins.x - 3 && psx <= ins.x + tw + 3 && psy >= ins.y - th - 3 && psy <= ins.y + 3) hitIdx = idx
   })
   if (hitIdx < 0) return null
   const hit = mapData.inserts[hitIdx]
@@ -95,7 +95,7 @@ export function findPinRow(mapData, pin) {
   // saman rivin omien lohkojen pieni mittausvaihtelu, ei naapuririvin väli.
   const yTol = th * 0.25
   const gapTol = 25 * sxm // reilusti isompi kuin tavallinen pöytäväli, jotta rivin sisäiset huoltokäytävät ym. eivät katkaise ketjua turhaan
-  const rowY = hit.y + th / 2
+  const rowY = hit.y - th / 2
 
   // Tarkistaa kulkeeko jokin "raja-viiva" kahden lohkon välistä. Tähän
   // lasketaan sekä tiet (mapData.roads) että aluerajat — dxfParser.js lukee
@@ -143,7 +143,7 @@ export function findPinRow(mapData, pin) {
   // 3. Rivin oma oikea reuna = suurin (ins.x + leveys) vain ketjuun kuuluvista lohkoista
   const rowRightX = Math.max(...chain.map(e => e.right))
   const targetX = rowRightX
-  const targetY = hit.y + th / 2
+  const targetY = hit.y - th / 2
 
   // 4. Etsi lähin numerolappu VAIN saman Y-kaistan sisältä, ja hylkää jos
   //    lähinkin on epäuskottavan kaukana (esim. toiselta puolelta karttaa).
@@ -198,8 +198,8 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
     const left = ins.x, right = ins.x + ins.panels * PANEL_W_M * sxm
     if (left < minX) minX = left
     if (right > maxX) maxX = right
-    if (ins.y < minY) minY = ins.y
-    if (ins.y + th > maxY) maxY = ins.y + th
+    if (ins.y - th < minY) minY = ins.y - th
+    if (ins.y > maxY) maxY = ins.y
   })
 
   const padX = Math.max(6 * sxm, (maxX - minX) * 0.05)
@@ -225,14 +225,14 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
   mapData.inserts.forEach((ins, idx) => {
     const right = ins.x + ins.panels * PANEL_W_M * sxm
     const left = ins.x
-    if (right < svgX0 || left > svgX1 || ins.y + th < svgY0 || ins.y > svgY1) return // skip off-screen tables
+    if (right < svgX0 || left > svgX1 || ins.y < svgY0 || ins.y - th > svgY1) return // skip off-screen tables
     const tw = ins.panels * PANEL_W_M * sxm * kx, thpx = TABLE_DEPTH_M * sym * ky
     const isHi = highlightIdx.has(idx)
     ctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
     ctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
     ctx.lineWidth = isHi ? 1.4 : 0.5
-    ctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
-    ctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
+    ctx.fillRect(px(ins.x), py(ins.y) - thpx, tw, thpx)
+    ctx.strokeRect(px(ins.x), py(ins.y) - thpx, tw, thpx)
   })
 
   ctx.textAlign = 'center'
@@ -251,105 +251,4 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
   ctx.strokeStyle = 'white'; ctx.lineWidth = 2.5; ctx.stroke()
 
   return canvas.toDataURL('image/jpeg', 0.85)
-}
-
-// Renders one combined map image containing ALL pins from `items` (a list of
-// observations that share a fault category), so an installer can see every
-// occurrence of that fault on one picture instead of paging through a
-// separate map per observation. Crops to a bounding box that covers all the
-// pins' full rows (plus padding), highlights every row that contains at
-// least one pin, and draws each pin as a small numbered circle (1, 2, 3…)
-// matching the numbered list printed alongside the image. Shared between
-// the PDF export (App.jsx, "Yhdistä samat vikatyypit") and the installer's
-// task list (InstallerView.jsx) so both look and behave identically.
-export function renderGroupMapImage(mapData, items) {
-  const sxm = mapData.W / (mapData.maxX - mapData.minX)
-  const sym = mapData.H / (mapData.maxY - mapData.minY)
-  const th = TABLE_DEPTH_M * sym
-
-  const pins = items.map(o => ({ x: o.pin.x * mapData.W, y: o.pin.y * mapData.H }))
-
-  // Find each pin's full row (using the shared, bug-fixed findPinRow) once,
-  // and reuse it both for highlighting and for sizing the crop.
-  const rowInfos = items.map(o => findPinRow(mapData, o.pin))
-  const highlightIdx = new Set()
-  const rowLabels = rowInfos.map(info => {
-    if (info) info.rowInsertIdxs.forEach(idx => highlightIdx.add(idx))
-    return info ? info.label : null
-  })
-
-  let minX = Math.min(...pins.map(p => p.x)), maxX = Math.max(...pins.map(p => p.x))
-  let minY = Math.min(...pins.map(p => p.y)), maxY = Math.max(...pins.map(p => p.y))
-
-  // Expand the bounding box to cover each pin's ENTIRE row — every segment
-  // of the chain findPinRow found, not just a fixed radius around the pin
-  // point. A "zoomed enough to see the pin clearly" crop showed only one
-  // anonymous colour block with no row number and no sense of where along
-  // a long row it sat. Showing the whole row (segments + its number label)
-  // instead always gives that context, at the cost of a wider image when
-  // the row itself is long — which is the correct trade-off here.
-  highlightIdx.forEach(idx => {
-    const ins = mapData.inserts[idx]
-    const left = ins.x, right = ins.x + ins.panels * PANEL_W_M * sxm
-    if (left < minX) minX = left
-    if (right > maxX) maxX = right
-    if (ins.y < minY) minY = ins.y
-    if (ins.y + th > maxY) maxY = ins.y + th
-  })
-
-  // Small, mostly fixed margin now — the crop width is already driven by
-  // the row's real extent, not by guesswork padding.
-  const padX = Math.max(6 * sxm, (maxX - minX) * 0.05)
-  const padY = Math.max(9 * sym, (maxY - minY) * 0.2)
-  const svgX0 = Math.max(0, minX - padX)
-  const svgY0 = Math.max(0, minY - padY)
-  const svgX1 = Math.min(mapData.W, maxX + padX)
-  const svgY1 = Math.min(mapData.H, maxY + padY)
-  const svgCropW = Math.max(1, svgX1 - svgX0), svgCropH = Math.max(1, svgY1 - svgY0)
-
-  const outW = 1400, outH = Math.round(outW * svgCropH / svgCropW)
-  const canvas = document.createElement('canvas')
-  canvas.width = outW; canvas.height = outH
-  const mctx = canvas.getContext('2d')
-  mctx.fillStyle = '#eef4ec'; mctx.fillRect(0, 0, outW, outH)
-  const kx = outW / svgCropW, ky = outH / svgCropH
-  const px = sx => (sx - svgX0) * kx, py = sy => (sy - svgY0) * ky
-
-  mctx.fillStyle = 'rgba(200,223,245,0.85)'; mctx.strokeStyle = '#4a90d9'; mctx.lineWidth = 1.2
-  mapData.pvAreas.forEach(pts => {
-    mctx.beginPath(); pts.forEach(([x, y2], i) => i === 0 ? mctx.moveTo(px(x), py(y2)) : mctx.lineTo(px(x), py(y2)))
-    mctx.closePath(); mctx.fill(); mctx.stroke()
-  })
-
-  mapData.inserts.forEach((ins, idx) => {
-    const tw = ins.panels * PANEL_W_M * sxm * kx
-    const thpx = TABLE_DEPTH_M * sym * ky
-    const isHi = highlightIdx.has(idx)
-    mctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
-    mctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
-    mctx.lineWidth = isHi ? 1.6 : 0.6
-    mctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
-    mctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
-  })
-
-  mctx.textAlign = 'center'
-  mapData.rowNumbers.forEach(t => {
-    mctx.font = 'bold 12px sans-serif'
-    mctx.fillStyle = 'rgba(255,255,255,0.75)'
-    mctx.fillRect(px(t.x) - 9, py(t.y) - 9, 18, 12)
-    mctx.fillStyle = '#0d1a6e'
-    mctx.fillText(t.text, px(t.x), py(t.y) + 1)
-  })
-
-  // Numbered pins — number matches the item list printed alongside the image.
-  pins.forEach((p, i) => {
-    const cx = px(p.x), cy = py(p.y)
-    mctx.beginPath(); mctx.arc(cx, cy, 11, 0, Math.PI * 2)
-    mctx.fillStyle = '#d63030'; mctx.fill()
-    mctx.strokeStyle = 'white'; mctx.lineWidth = 2; mctx.stroke()
-    mctx.font = 'bold 13px sans-serif'; mctx.fillStyle = 'white'
-    mctx.fillText(String(i + 1), cx, cy + 4)
-  })
-
-  return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), outW, outH, rowLabels }
 }

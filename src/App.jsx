@@ -93,8 +93,15 @@ function renderGroupMapImage(mapData, items) {
     mctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
     mctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
     mctx.lineWidth = isHi ? 1.6 : 0.6
-    mctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
-    mctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
+    // HUOM: ins.y on pöydän ALAREUNA (sama konventio kuin elävässä
+    // MapView.jsx:ssä, jossa pöytä piirretään y={ins.y - th}) — pöytä siis
+    // ulottuu YLÖSPÄIN ins.y:stä, ei alaspäin. Aiemmin tämä piirsi pöydän
+    // alaspäin (py(ins.y) suoraan), mikä siirsi jokaisen pöydän PDF:ssä
+    // yhden pöydän-syvyyden verran väärään kohtaan pystysuunnassa — piste
+    // (joka lasketaan oikein) näytti tämän vuoksi osuvan rivin reunalle tai
+    // väärän pöydän kohdalle sen sijaan että olisi keskellä oikeaa pöytää.
+    mctx.fillRect(px(ins.x), py(ins.y) - thpx, tw, thpx)
+    mctx.strokeRect(px(ins.x), py(ins.y) - thpx, tw, thpx)
   })
 
   mctx.textAlign = 'center'
@@ -766,8 +773,9 @@ export default function App() {
             mctx.fillStyle = isPinRow ? 'rgba(214,48,48,0.35)' : 'rgba(26,47,204,0.22)'
             mctx.strokeStyle = isPinRow ? '#d63030' : '#1a2fcc'
             mctx.lineWidth = isPinRow ? 2 : 0.7
-            mctx.fillRect(px(ins.x), py(ins.y), tw, th)
-            mctx.strokeRect(px(ins.x), py(ins.y), tw, th)
+            // ins.y = pöydän alareuna (sama konventio kuin MapView.jsx:ssä) — ks. selitys renderGroupMapImagessa
+            mctx.fillRect(px(ins.x), py(ins.y) - th, tw, th)
+            mctx.strokeRect(px(ins.x), py(ins.y) - th, tw, th)
           })
 
           mctx.textAlign = 'center'
