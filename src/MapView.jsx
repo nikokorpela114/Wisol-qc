@@ -3,7 +3,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react'
 const PANEL_W_M = 1.15   // meters per panel (width along X)
 const TABLE_DEPTH_M = 4.29  // meters deep (Y direction, always fixed)
 
-export default function MapView({ mapData, pin, onPin, gpsCoords }) {
+export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, readOnly = false, extraPins = [] }) {
   const containerRef = useRef(null)
   const [transform, setTransform] = useState({ scale: 1, tx: 0, ty: 0 })
   const stateRef = useRef({ scale: 1, tx: 0, ty: 0 })
@@ -195,26 +195,31 @@ export default function MapView({ mapData, pin, onPin, gpsCoords }) {
     y: pin.y * H * transform.scale + transform.ty
   } : null
 
+  const extraDots = extraPins.filter(Boolean).map(p => ({
+    x: p.x * W * transform.scale + transform.tx,
+    y: p.y * H * transform.scale + transform.ty
+  }))
+
   // Scale for text readability
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
   // Desired ON-SCREEN pixel height for row-number labels. Rivinumerot
   // renderöidään omassa g-elementissään käänteisellä skaalauksella (ks.
   // alempana), joten tämä arvo on suoraan se pikselikoko joka näkyy
-  // ruudulla riippumatta kartan zoomista. Aiemmin tämä oli täysin kiinteä
-  // (10px joka zoomilla) — se korjasi kaukaa zoomatessa syntyneen sotkun,
-  // mutta teki numeroista liian pieniä/epäselviä kun zoomasi LÄHELLE,
-  // koska teksti ei enää kasvanut ollenkaan zoomin mukana niin kuin kartan
-  // muut elementit kasvavat. Nyt koko kasvaa maltillisesti zoomatessa
-  // lähemmäs (log2-asteikolla, jotta kasvu ei karkaa käsistä), mutta ei
+  // ruudulla riippumatta kartan zoomista. Vanha `scaledFontSize` oli
+  // väärään suuntaan laskettu (10/scale suoraan map-avaruudessa), mikä
+  // yhdistettynä SVG:n omaan CSS-skaalaukseen sai numerot paisumaan
+  // jättimäisiksi lähelle zoomatessa ja lähes näkymättömiin kauas
+  // zoomatessa (tausta-laatikko ei enää osunut tekstin päälle). Tämä
+  // kasvaa maltillisesti zoomatessa lähemmäs (log2-asteikolla), mutta ei
   // koskaan mene alle luettavan minimin kun zoomataan kauas.
   const desiredLabelPx = Math.max(11, Math.min(20, 11 + Math.log2(Math.max(0.5, transform.scale)) * 4))
 
   return (
-    <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', background: '#eef4ec' }}>
+    <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', background: '#eef4ec', height: typeof height === 'string' ? '100%' : undefined, display: typeof height === 'string' ? 'flex' : undefined, flexDirection: typeof height === 'string' ? 'column' : undefined }}>
       <div
         ref={containerRef}
-        style={{ height: 240, position: 'relative', overflow: 'hidden', touchAction: 'none', userSelect: 'none', cursor: 'grab' }}
+        style={{ height, flex: typeof height === 'string' ? 1 : undefined, position: 'relative', overflow: 'hidden', touchAction: 'none', userSelect: 'none', cursor: 'grab' }}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
@@ -294,17 +299,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords }) {
             )
           })}
 
-          {/* Row numbers - white bg for legibility.
-              Each label gets its own local coordinate system with an
-              inverse scale (1/transform.scale) applied via transform, so
-              its ON-SCREEN size stays constant no matter how far you've
-              zoomed. Previously fontSize was computed as 10/scale directly
-              in map-space, which is backwards once the outer <svg> is also
-              CSS-scaled by transform.scale: the two multiply together, so
-              zooming IN made numbers balloon huge, and zooming OUT made
-              them shrink to ~1px while their white background box (fixed
-              in map-space) stayed a normal size — number and box drifting
-              apart, i.e. the "sotku" (mess) at far zoom. */}
+          {/* Row numbers - white bg for legibility */}
           {rowNumbers.map((t, i) => (
             <g key={`t${i}`} transform={`translate(${t.x}, ${t.y}) scale(${desiredLabelPx / 10 / transform.scale})`}>
               <rect
@@ -352,6 +347,20 @@ export default function MapView({ mapData, pin, onPin, gpsCoords }) {
           </>
         )}
 
+        {/* Pikalisäyksessä jo lisätyt havainnot — pienempinä oransseina
+            pisteinä, jotta näkee millä kohtaa on jo käynyt, ilman että ne
+            sekoittuvat itse aktiiviseen (punaiseen) pinniin */}
+        {extraDots.map((d, i) => (
+          <div key={i} style={{
+            position: 'absolute', left: d.x, top: d.y,
+            width: 11, height: 11, borderRadius: '50%',
+            background: '#e8890c', border: '2px solid white',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+            transform: 'translate(-50%,-50%)',
+            pointerEvents: 'none', zIndex: 4
+          }} />
+        ))}
+
         {/* Pin dot overlay */}
         {pinDot && (
           <div style={{
@@ -372,10 +381,12 @@ export default function MapView({ mapData, pin, onPin, gpsCoords }) {
       </div>
 
       {/* Bottom bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 10px', background: '#eef0f7', borderTop: '0.5px solid #d0d5e8' }}>
-        <span style={{ fontSize: 11, color: '#6670a0' }}>🔵 GPS · Napauta = punainen piste</span>
-        <button onClick={() => onPin(null)} style={{ background: 'none', border: 'none', fontSize: 11, color: '#d63030', padding: '2px 0' }}>Poista</button>
-      </div>
+      {!readOnly && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 10px', background: '#eef0f7', borderTop: '0.5px solid #d0d5e8' }}>
+          <span style={{ fontSize: 11, color: '#6670a0' }}>🔵 GPS · Napauta = punainen piste</span>
+          <button onClick={() => onPin(null)} style={{ background: 'none', border: 'none', fontSize: 11, color: '#d63030', padding: '2px 0' }}>Poista</button>
+        </div>
+      )}
     </div>
   )
 }
