@@ -3,7 +3,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react'
 const PANEL_W_M = 1.15   // meters per panel (width along X)
 const TABLE_DEPTH_M = 4.29  // meters deep (Y direction, always fixed)
 
-export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, readOnly = false, extraPins = [] }) {
+export default function MapView({ mapData, pin, onPin, gpsCoords, onViewChange }) {
   const containerRef = useRef(null)
   const [transform, setTransform] = useState({ scale: 1, tx: 0, ty: 0 })
   const stateRef = useRef({ scale: 1, tx: 0, ty: 0 })
@@ -18,14 +18,23 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     const scale = Math.min(cw / W, ch / H) * 0.95
     const tx = (cw - W * scale) / 2
     const ty = (ch - H * scale) / 2
-    stateRef.current = { scale, tx, ty }
-    setTransform({ scale, tx, ty })
+    const s = { scale, tx, ty }
+    stateRef.current = s
+    setTransform(s)
+    // Report the initial auto-fit view too — otherwise an observation whose
+    // pin was placed without any manual zoom/pan never gets a mapView saved,
+    // and the PDF export falls back to a wrong default (scale 1, tx/ty 0).
+    if (onViewChange) onViewChange({ ...s, containerW: cw, containerH: ch })
   }, [W, H])
 
   const applyTransform = useCallback((s) => {
     stateRef.current = s
     setTransform({ ...s })
-  }, [])
+    if (onViewChange) {
+      const el = containerRef.current
+      onViewChange({ ...s, containerW: el?.clientWidth, containerH: el?.clientHeight })
+    }
+  }, [onViewChange])
 
   const clamp = useCallback((s) => {
     const el = containerRef.current
@@ -195,20 +204,15 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     y: pin.y * H * transform.scale + transform.ty
   } : null
 
-  const extraDots = extraPins.filter(Boolean).map(p => ({
-    x: p.x * W * transform.scale + transform.tx,
-    y: p.y * H * transform.scale + transform.ty
-  }))
-
   // Scale for text readability
   const scaledFontSize = Math.max(7, Math.min(14, 10 / transform.scale))
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
   return (
-    <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', background: '#eef4ec', height: typeof height === 'string' ? '100%' : undefined, display: typeof height === 'string' ? 'flex' : undefined, flexDirection: typeof height === 'string' ? 'column' : undefined }}>
+    <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', background: '#eef4ec' }}>
       <div
         ref={containerRef}
-        style={{ height, flex: typeof height === 'string' ? 1 : undefined, position: 'relative', overflow: 'hidden', touchAction: 'none', userSelect: 'none', cursor: 'grab' }}
+        style={{ height: 240, position: 'relative', overflow: 'hidden', touchAction: 'none', userSelect: 'none', cursor: 'grab' }}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
@@ -267,7 +271,8 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             />
           ))}
 
-          {/* Panel tables: width = panels × 1.15m along X, depth = 4.29m along Y */}
+          {/* Panel tables: insert point = top-left corner in SVG coords.
+              Width = panels × 1.15m along X, depth = 4.29m downward in SVG (positive Y). */}
           {inserts.map((ins, i) => {
             const scaleXm = W / (maxX - minX)
             const scaleYm = H / (maxY - minY)
@@ -277,13 +282,13 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
               <rect
                 key={`ins${i}`}
                 x={ins.x}
-                y={ins.y - th}
+                y={ins.y}
                 width={tw}
                 height={th}
                 fill="#1a2fcc"
-                fillOpacity={0.18}
+                fillOpacity={0.25}
                 stroke="#1a2fcc"
-                strokeWidth={strokeW * 0.5}
+                strokeWidth={Math.max(0.5, strokeW)}
               />
             )
           })}
@@ -336,20 +341,6 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
           </>
         )}
 
-        {/* Pikalisäyksessä jo lisätyt havainnot — pienempinä oransseina
-            pisteinä, jotta näkee millä kohtaa on jo käynyt, ilman että ne
-            sekoittuvat itse aktiiviseen (punaiseen) pinniin */}
-        {extraDots.map((d, i) => (
-          <div key={i} style={{
-            position: 'absolute', left: d.x, top: d.y,
-            width: 11, height: 11, borderRadius: '50%',
-            background: '#e8890c', border: '2px solid white',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
-            transform: 'translate(-50%,-50%)',
-            pointerEvents: 'none', zIndex: 4
-          }} />
-        ))}
-
         {/* Pin dot overlay */}
         {pinDot && (
           <div style={{
@@ -370,12 +361,10 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
       </div>
 
       {/* Bottom bar */}
-      {!readOnly && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 10px', background: '#eef0f7', borderTop: '0.5px solid #d0d5e8' }}>
-          <span style={{ fontSize: 11, color: '#6670a0' }}>🔵 GPS · Napauta = punainen piste</span>
-          <button onClick={() => onPin(null)} style={{ background: 'none', border: 'none', fontSize: 11, color: '#d63030', padding: '2px 0' }}>Poista</button>
-        </div>
-      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 10px', background: '#eef0f7', borderTop: '0.5px solid #d0d5e8' }}>
+        <span style={{ fontSize: 11, color: '#6670a0' }}>🔵 GPS · Napauta = punainen piste</span>
+        <button onClick={() => onPin(null)} style={{ background: 'none', border: 'none', fontSize: 11, color: '#d63030', padding: '2px 0' }}>Poista</button>
+      </div>
     </div>
   )
 }
