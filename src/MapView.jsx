@@ -200,57 +200,8 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     y: p.y * H * transform.scale + transform.ty
   }))
 
-  // Row-number label sizing + overlap prevention.
-  //
-  // Aiempi versio (scaledFontSize = clamp(7,14, 10/scale)) laski koon
-  // väärään suuntaan: koska koko <svg> on jo CSS-skaalattu
-  // scale(transform.scale):lla, tämä paikallinen koko kerrottui vielä
-  // sillä samalla luvulla, jolloin lähelle zoomatessa numerot paisuivat
-  // jättimäisiksi ja kauas zoomatessa lähes näkymättömiin, minkä lisäksi
-  // tausta-laatikko (kiinteä koko) ja teksti (vaihtuva koko) ajautuivat
-  // erilleen toisistaan.
-  //
-  // HUOM: aiemmin kokeiltiin korjata tätä kääräisemällä jokainen numero
-  // omaan <g transform="scale(...)">:iin, mutta se aiheutti UUDEN,
-  // vakavamman ongelman: osa selaimista (etenkin mobiili-Safari) piirtää
-  // SVG-tekstin rosoisena/epäselvänä kun se on transform-skaalattu, koska
-  // glyfit lasketaan ensin ja venytetään/kutistetaan vasta sen jälkeen
-  // matriisilla — sen sijaan että kirjasin piirrettäisiin suoraan oikean
-  // kokoisena. Siksi `fontSize` lasketaan nyt SUORAAN oikeaksi paikalliseksi
-  // lukuarvoksi (kuten alkuperäisessä koodissa), ei enää transform-temppuna:
-  // `k` on kerroin joka vastaa sitä, kuinka paljon isompi/pienempi haluttu
-  // näyttökoko on alkuperäiseen 10px-suunnitteluun nähden, ja sillä
-  // skaalataan sekä fontSize että tausta-laatikon mitat samassa suhteessa
-  // kuin alkuperäinen 16×10-laatikko + fontSize 10 -asettelu käytti.
-  //
-  // Pelkkä kiinteä näyttökoko ei silti riitä: kun zoomaa hyvin kauas,
-  // rivien välinen etäisyys RUUDULLA pienenee, ja jos numerolaatikot
-  // pysyvät silti kiinteän kokoisina, ne alkavat mennä päällekkäin ja
-  // sekoittua toisiinsa (juuri tämä aiheutti sotkun). Siksi numeron koko
-  // sidotaan suoraan TODELLISEEN rivien väliin ruudulla (rowSpacingPx),
-  // ei mihinkään zoomista irralliseen kaavaan — aiempi
-  // "11 + log2(scale)*4" -kaava ja sen 1.5x-piilotuskynnys eivät liittyneet
-  // rivien väliin mitenkään, joten se piilotti numerot lähes aina, myös
-  // ihan tavallisella oletuszoomilla. Nyt: koko kasvaa suoraan rivien
-  // välin mukana (max 20px), ja numerot piilotetaan VAIN jos edes 9px
-  // (pienin vielä luettava koko) ei mahtuisi ilman päällekkäisyyttä —
-  // sama periaate kuin tavallisissa karttasovelluksissa, joissa nimet
-  // ilmestyvät heti kun tilaa on edes vähän ja katoavat vasta kun rivit
-  // ovat oikeasti aivan liian lähekkäin.
-  const scaleYm = H / (maxY - minY)
-  const rowSpacingPx = TABLE_DEPTH_M * scaleYm * transform.scale
-  const rawLabelPx = rowSpacingPx * 0.8   // 0.8 = pieni marginaali ettei laatikko osu naapuririvin laatikkoon kiinni
-  const showRowLabels = rawLabelPx >= 9
-  const desiredLabelPx = Math.min(20, Math.max(9, rawLabelPx))
-  const labelK = desiredLabelPx / 10 / transform.scale   // skaalauskerroin alkup. 10px-suunnitteluun nähden, paikallisissa SVG-yksiköissä
-  const labelFontSize = 10 * labelK
-  const labelBoxHalfW = 8 * labelK
-  const labelBoxHalfH = 8 * labelK
-  const labelBoxW = 16 * labelK
-  const labelBoxH = 10 * labelK
-  const labelRx = 1 * labelK
-
   // Scale for text readability
+  const scaledFontSize = Math.max(7, Math.min(14, 10 / transform.scale))
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
   return (
@@ -337,27 +288,22 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             )
           })}
 
-          {/* Row numbers - white bg for legibility. Piilossa kun rivit
-              olisivat liian lähekkäin ruudulla (ks. showRowLabels yllä).
-              fontSize ja laatikon mitat lasketaan suoraan oikeiksi
-              paikallisiksi lukuarvoiksi (ei transform-scale-koukkua),
-              koska transform-skaalattu SVG-teksti renderöityy rosoisena
-              osalla selaimista. */}
-          {showRowLabels && rowNumbers.map((t, i) => (
+          {/* Row numbers - white bg for legibility */}
+          {rowNumbers.map((t, i) => (
             <g key={`t${i}`}>
               <rect
-                x={t.x - labelBoxHalfW}
-                y={t.y - labelBoxHalfH}
-                width={labelBoxW}
-                height={labelBoxH}
+                x={t.x - 8}
+                y={t.y - 8}
+                width={16}
+                height={10}
                 fill="white"
                 fillOpacity={0.75}
-                rx={labelRx}
+                rx={1}
               />
               <text
                 x={t.x}
                 y={t.y}
-                fontSize={labelFontSize}
+                fontSize={Math.max(9, scaledFontSize)}
                 fill="#0d1a6e"
                 fontFamily="sans-serif"
                 fontWeight="bold"
