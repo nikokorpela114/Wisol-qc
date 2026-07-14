@@ -144,7 +144,7 @@ export default function App() {
   const [pdfBlob, setPdfBlob] = useState(null)
   const [pdfName, setPdfName] = useState('')
   const [pdfDownloaded, setPdfDownloaded] = useState(false)
-  const [groupByCategory, setGroupByCategory] = useState(false)
+  const [groupByCategory, setGroupByCategory] = useState(true) // oletuksena päällä: samat vikatyypit yhdistetään aina samaan karttakuvaan PDF:ssä
   const [isOnline, setIsOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine)
   const [installers, setInstallers] = useState([])
   const [teams, setTeams] = useState([])
@@ -449,7 +449,7 @@ export default function App() {
       const clone = {
         id, cat: o.cat, sev: o.sev, note: '', muu: o.muu, photos: [],
         pin, db_id: null, createdAt: new Date().toISOString(),
-        clonedFrom: o.id,
+        clonedFrom: o.id, // pikalisäyksen aikana luotu — käytetään extraPins-listaan MapView'ssa
       }
       setObs(prev => [...prev, clone])
       saveObs(clone, site, inspector, rivi)
