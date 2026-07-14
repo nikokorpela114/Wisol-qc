@@ -198,6 +198,18 @@ export default function MapView({ mapData, pin, onPin, gpsCoords }) {
   // Scale for text readability
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
+  // Desired ON-SCREEN pixel height for row-number labels. Rivinumerot
+  // renderöidään omassa g-elementissään käänteisellä skaalauksella (ks.
+  // alempana), joten tämä arvo on suoraan se pikselikoko joka näkyy
+  // ruudulla riippumatta kartan zoomista. Aiemmin tämä oli täysin kiinteä
+  // (10px joka zoomilla) — se korjasi kaukaa zoomatessa syntyneen sotkun,
+  // mutta teki numeroista liian pieniä/epäselviä kun zoomasi LÄHELLE,
+  // koska teksti ei enää kasvanut ollenkaan zoomin mukana niin kuin kartan
+  // muut elementit kasvavat. Nyt koko kasvaa maltillisesti zoomatessa
+  // lähemmäs (log2-asteikolla, jotta kasvu ei karkaa käsistä), mutta ei
+  // koskaan mene alle luettavan minimin kun zoomataan kauas.
+  const desiredLabelPx = Math.max(11, Math.min(20, 11 + Math.log2(Math.max(0.5, transform.scale)) * 4))
+
   return (
     <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', background: '#eef4ec' }}>
       <div
@@ -294,7 +306,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords }) {
               in map-space) stayed a normal size — number and box drifting
               apart, i.e. the "sotku" (mess) at far zoom. */}
           {rowNumbers.map((t, i) => (
-            <g key={`t${i}`} transform={`translate(${t.x}, ${t.y}) scale(${1 / transform.scale})`}>
+            <g key={`t${i}`} transform={`translate(${t.x}, ${t.y}) scale(${desiredLabelPx / 10 / transform.scale})`}>
               <rect
                 x={-8}
                 y={-8}
