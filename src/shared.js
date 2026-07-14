@@ -176,12 +176,31 @@ export function findPinRow(mapData, pin) {
 
   // 4. Etsi lähin numerolappu VAIN saman Y-kaistan sisältä, ja hylkää jos
   //    lähinkin on epäuskottavan kaukana (esim. toiselta puolelta karttaa).
-  //    Numerolapun oma Y-toleranssi on tarkoituksella löysempi kuin rivin
-  //    ketjutuksen yTol yllä — labelin tekstianckeri ei aina osu tasan
-  //    pöydän keskikohtaan, mutta silti on selvästi lähempänä omaa riviään
-  //    kuin naapuririviä.
-  const labelYTol = th * 0.6
-  const maxLabelDist = th * 4 // n. rivin syvyyden nelinkertainen etäisyys riittää kattamaan reunan epätarkkuudet
+  //
+  //    HUOM (löydetty DXF-datasta suoraan): joillain työmaan alueilla
+  //    paneelipöydät on kierretty (esim. block-nimessä "@30DEG"), jolloin
+  //    niiden todellinen Y-suuntainen rivi-väli EI vastaa kiinteää
+  //    TABLE_DEPTH_M (4.29 m) -oletusta — mitattu esimerkki: todellinen
+  //    väli oli ~10.0 yksikköä, yli 2× suurempi kuin th. Kiinteä
+  //    th-pohjainen toleranssi oli tällöin liian tiukka ja "Havaittu rivi"
+  //    katosi kokonaan tällaisilla kierretyillä alueilla. Sen sijaan että
+  //    luotettaisiin kiinteään th:hon, mitataan TODELLINEN rivi-väli
+  //    dynaamisesti lähialueen numerolapuista (erotus kahden lähimmän
+  //    ERI-Y:n lapun välillä samalla X-kaistalla) ja käytetään sitä
+  //    toleranssin pohjana — tämä mukautuu automaattisesti sekä normaaleihin
+  //    että kierrettyihin alueisiin ilman että pöytien piirtoa (joka
+  //    edelleen jättää kierron huomiotta) tarvitsee korjata erikseen.
+  const nearbyLabelsX = mapData.rowNumbers.filter(t => Math.abs(t.x - targetX) < th * 6)
+  const distinctYs = [...new Set(nearbyLabelsX.map(t => Math.round(t.y * 100) / 100))].sort((a, b) => b - a)
+  let localPitch = th // fallback jos alle 2 lappua löytyy lähialueelta
+  if (distinctYs.length >= 2) {
+    const gaps = []
+    for (let i = 0; i < distinctYs.length - 1; i++) gaps.push(distinctYs[i] - distinctYs[i + 1])
+    gaps.sort((a, b) => a - b)
+    localPitch = gaps[Math.floor(gaps.length / 2)] // mediaani kestää yksittäiset poikkeamat paremmin kuin min/ka
+  }
+  const labelYTol = Math.max(th * 0.6, localPitch * 0.45)
+  const maxLabelDist = Math.max(th * 4, localPitch * 3)
   let best = Infinity, label = null
   mapData.rowNumbers.forEach(t => {
     if (Math.abs(t.y - targetY) > labelYTol) return // eri Y-kaista → ei voi olla saman rivin numero
