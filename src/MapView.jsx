@@ -275,21 +275,22 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
   // (scaledFontSize = 10/scale), joka aiheutti numeroiden paisumisen
   // jättimäisiksi lähelle zoomatessa ja lähes näkymättömiksi kauas
   // zoomatessa, koska SVG:n oma CSS-skaalaus kertautui laskennan päälle.
+  //
+  // HUOM 2: kokeiltiin myös siirtää numerolappu sivuun (labelGap) ja
+  // piilottaa osa numeroista törmäystarkistuksella, mutta molemmat
+  // osoittautuivat TARPEETTOMIKSI ja huononsivat lopputulosta viisto-
+  // reunaisilla työmailla — suora, keskitetty sijoittelu DXF:n omaan
+  // tekstipisteeseen (kuten alun perin) toimii itsessään hyvin, koska
+  // työmaan suunnittelija on jo asemoinut numerot järkevästi. Molemmat
+  // lisäykset on siis poistettu, jäljellä on vain oikea kokolaskenta.
   const desiredLabelPx = Math.max(11, Math.min(20, 11 + Math.log2(Math.max(0.5, transform.scale)) * 4))
   const labelK = desiredLabelPx / 10 / transform.scale
   const labelFontSize = 10 * labelK
-  const labelGap = 6 * labelK // pieni väli numerolapun ja itse rivin väliin, ettei laatikko peity pöydän päälle
+  const labelBoxHalfW = 8 * labelK
+  const labelBoxHalfH = 8 * labelK
+  const labelBoxW = 16 * labelK
   const labelBoxH = 10 * labelK
   const labelRx = 1 * labelK
-  // HUOM: tässä kokeiltiin aiemmin piilottaa numerot kokonaan jos rivien
-  // väli ruudulla olisi teoriassa liian pieni (laskettuna kiinteästä
-  // TABLE_DEPTH_M-oletuksesta), mutta tämä osoittautui epäluotettavaksi —
-  // eri työmailla todellinen rivinväli vaihtelee (sama syy joka aiemmin
-  // aiheutti "eri kokoinen eri alueilla" -bugin), ja kynnys saattoi laskea
-  // väärin niin että numerot katosivat KOKONAAN, ei vain tiheillä
-  // kohdilla. Numerot näytetään siis nyt aina; uusi sijoittelu rivin
-  // oikealle puolelle (labelGap) jo vähentää päällekkäisyysriskiä
-  // riittävästi ilman tätä hauraaksi osoittautunutta piilotuslogiikkaa.
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
   return (
@@ -381,38 +382,35 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             )
           })}
 
-          {/* Row numbers - white bg for legibility. Sijoitetaan lapun
-              VASEN reuna DXF:n tekstipisteeseen + pieni väli (ei enää
-              keskitetty pisteen päälle), jotta laatikko ei mene
-              pöydän päälle vaan istuu selkeästi sen jatkeena. */}
-          {rowNumbers.map((t, i) => {
-            const bx = t.x + labelGap // laatikon vasen reuna
-            return (
-              <g key={`t${i}`}>
-                <rect
-                  x={bx}
-                  y={t.y - labelBoxH / 2}
-                  width={labelFontSize * 1.7}
-                  height={labelBoxH}
-                  fill="white"
-                  fillOpacity={0.85}
-                  rx={labelRx}
-                />
-                <text
-                  x={bx + labelFontSize * 0.85}
-                  y={t.y}
-                  dominantBaseline="middle"
-                  fontSize={labelFontSize}
-                  fill="#0d1a6e"
-                  fontFamily="sans-serif"
-                  fontWeight="bold"
-                  textAnchor="middle"
-                >
-                  {t.text}
-                </text>
-              </g>
-            )
-          })}
+          {/* Row numbers - white bg for legibility. Keskitetty suoraan
+              DXF:n omaan tekstipisteeseen (t.x, t.y) — toimii hyvin koska
+              työmaan suunnittelija on jo asemoinut numerot järkevästi
+              rivien päähän myös viistoreunaisilla alueilla. */}
+          {rowNumbers.map((t, i) => (
+            <g key={`t${i}`}>
+              <rect
+                x={t.x - labelBoxHalfW}
+                y={t.y - labelBoxHalfH}
+                width={labelBoxW}
+                height={labelBoxH}
+                fill="white"
+                fillOpacity={0.85}
+                rx={labelRx}
+              />
+              <text
+                x={t.x}
+                y={t.y}
+                dominantBaseline="middle"
+                fontSize={labelFontSize}
+                fill="#0d1a6e"
+                fontFamily="sans-serif"
+                fontWeight="bold"
+                textAnchor="middle"
+              >
+                {t.text}
+              </text>
+            </g>
+          ))}
         </svg>
 
         {/* GPS dot overlay */}
