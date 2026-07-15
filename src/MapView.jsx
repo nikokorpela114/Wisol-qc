@@ -462,7 +462,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
           }} />
         )}
 
-        {/* Zoom buttons */}
+                {/* Zoom buttons */}
         <div style={{ position: 'absolute', bottom: 8, right: 8, display: 'flex', flexDirection: 'column', gap: 4, zIndex: 10 }}>
           <button onClick={(e) => { e.stopPropagation(); zoom(1.5) }} style={zoomBtnStyle}>+</button>
           <button onClick={(e) => { e.stopPropagation(); zoom(0.67) }} style={zoomBtnStyle}>−</button>
@@ -486,13 +486,8 @@ const zoomBtnStyle = {
   border: '1px solid #ccc',
   borderRadius: 7,
   fontSize: 20, fontWeight: 600,
-  display: 'flex', alignItems: 'center', justifyContent: 'const zoomBtnStyle = {
-  width: 32, height: 32,
-  background: 'rgba(255,255,255,0.92)',
-  border: '1px solid #ccc',
-  borderRadius: 7,
-  fontSize: 20, fontWeight: 600,
   display: 'flex', alignItems: 'center', justifyContent: 'center',
   color: '#333'
 }
+
 
