@@ -143,13 +143,16 @@ export function findPinRow(mapData, pin) {
   // eri fyysiset rivit samaksi ketjuksi. Toleranssi on siksi tiukka — vain
   // saman rivin omien lohkojen pieni mittausvaihtelu, ei naapuririvin väli.
   const yTol = th * 0.25
-  // HUOM: alkuperäinen 25 m oli aivan liian löysä tiheämmin aseteltuja
-  // pöytälohkoja varten (esim. ~20-25 m levyiset lohkot tällä alueella) —
-  // se ketjutti todellisuudessa useita ERI rivejä yhdeksi jättiketjuksi
-  // (havaittu: 60 yksikön sijaintiero riitti tuottamaan 1 vs 6 lohkon
-  // ketjun ja täysin eri "Havaittu rivi" -tuloksen). Pienennetty selvästi
-  // realistisemmaksi huoltokäytävän levyiseksi väliksi.
-  const gapTol = 6 * sxm
+  // HUOM: 6 m osoittautui liian tiukaksi — havaittiin oikea, laillinen
+  // 48 yksikön huoltokäytävä saman rivin kahden pöytäryhmän välissä, jota
+  // ei enää ketjutettu yhteen, jolloin vasen pätkä ei löytänyt rivin
+  // OMAA numerolappua (se on vain rivin oikeassa päässä) ja haku napsahti
+  // väärään, lähimpään sattumanvaraiseen numeroon. Aiempi "455 yksikön
+  // jättiketju" -bugi ei itse asiassa johtunut suuresta gapTol:sta vaan
+  // PÄÄLLEKKÄISISTÄ/duplikoituneista DXF-lohkoista — se on jo erikseen
+  // estetty alla olevalla "gap >= -1" tarkistuksella, joten gapTol voi
+  // taas olla reilusti isompi ilman että sama bugi palaa.
+  const gapTol = 25 * sxm
   const rowY = hit.y - localPitch / 2
 
   // Tarkistaa kulkeeko jokin "raja-viiva" kahden lohkon välistä. Tähän
