@@ -76,12 +76,15 @@ export function findPinRow(mapData, pin) {
   const psx = pin.x * mapData.W, psy = pin.y * mapData.H
   const th = TABLE_DEPTH_M * sym
 
-  // 1. Etsi insert-lohko johon pinni osuu. (HUOM: ins.rot ei ole pöydän
-  //    pohjapiirroskierto vaan paneelin kallistuskulma — ei käytetä tässä.)
+  // 1. Etsi insert-lohko johon pinni osuu. HUOM: ins.y on pöydän
+  //    YLÄREUNA (todistetusti oikea konventio — vahvistettu vertaamalla
+  //    aiemmin oikeasti toimineeseen Netlify-julkaisuun), pöytä ulottuu
+  //    ALASPÄIN siitä. (ins.rot ei ole pöydän pohjapiirroskierto vaan
+  //    paneelin kallistuskulma — ei käytetä tässä.)
   let hitIdx = -1
   mapData.inserts.forEach((ins, idx) => {
     const tw = ins.panels * PANEL_W_M * sxm
-    if (psx >= ins.x - 3 && psx <= ins.x + tw + 3 && psy >= ins.y - th - 3 && psy <= ins.y + 3) hitIdx = idx
+    if (psx >= ins.x - 3 && psx <= ins.x + tw + 3 && psy >= ins.y - 3 && psy <= ins.y + th + 3) hitIdx = idx
   })
   // Fallback: joillain työmailla rivit on aseteltu hyvin tiheään (ks.
   // kommentti alempana "rivit 61/63/65 lähes päällekkäin"), jolloin
@@ -96,7 +99,7 @@ export function findPinRow(mapData, pin) {
     mapData.inserts.forEach((ins, idx) => {
       const tw = ins.panels * PANEL_W_M * sxm
       if (psx < ins.x - 3 || psx > ins.x + tw + 3) return // X-suunnassa oltava edes lähellä pöytää
-      const center = ins.y - th / 2
+      const center = ins.y + th / 2
       const d = Math.abs(psy - center)
       if (d < bestDist) { bestDist = d; hitIdx = idx }
     })
@@ -153,7 +156,7 @@ export function findPinRow(mapData, pin) {
   // estetty alla olevalla "gap >= -1" tarkistuksella, joten gapTol voi
   // taas olla reilusti isompi ilman että sama bugi palaa.
   const gapTol = 45 * sxm
-  const rowY = hit.y - localPitch / 2
+  const rowY = hit.y + localPitch / 2
 
   // Tarkistaa kulkeeko jokin "raja-viiva" kahden lohkon välistä. Tähän
   // lasketaan sekä tiet (mapData.roads) että aluerajat — dxfParser.js lukee
@@ -215,7 +218,7 @@ export function findPinRow(mapData, pin) {
   // 3. Rivin oma oikea reuna = suurin (ins.x + leveys) vain ketjuun kuuluvista lohkoista
   const rowRightX = Math.max(...chain.map(e => e.right))
   const targetX = rowRightX
-  const targetY = hit.y - localPitch / 2
+  const targetY = hit.y + localPitch / 2
 
   // 4. Etsi lähin numerolappu VAIN saman Y-kaistan sisältä, ja hylkää jos
   //    lähinkin on epäuskottavan kaukana (esim. toiselta puolelta karttaa).
@@ -291,8 +294,8 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
     const left = ins.x, right = ins.x + ins.panels * PANEL_W_M * sxm
     if (left < minX) minX = left
     if (right > maxX) maxX = right
-    if (ins.y - th < minY) minY = ins.y - th
-    if (ins.y > maxY) maxY = ins.y
+    if (ins.y < minY) minY = ins.y
+    if (ins.y + th > maxY) maxY = ins.y + th
   })
 
   const padX = Math.max(6 * sxm, (maxX - minX) * 0.05)
@@ -318,14 +321,14 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
   mapData.inserts.forEach((ins, idx) => {
     const right = ins.x + ins.panels * PANEL_W_M * sxm
     const left = ins.x
-    if (right < svgX0 || left > svgX1 || ins.y < svgY0 || ins.y - th > svgY1) return // skip off-screen tables
+    if (right < svgX0 || left > svgX1 || ins.y + th < svgY0 || ins.y > svgY1) return // skip off-screen tables
     const tw = ins.panels * PANEL_W_M * sxm * kx, thpx = TABLE_DEPTH_M * sym * ky
     const isHi = highlightIdx.has(idx)
     ctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
     ctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
     ctx.lineWidth = isHi ? 1.4 : 0.5
-    ctx.fillRect(px(ins.x), py(ins.y) - thpx, tw, thpx)
-    ctx.strokeRect(px(ins.x), py(ins.y) - thpx, tw, thpx)
+    ctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
+    ctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
   })
 
   ctx.textAlign = 'center'
@@ -379,16 +382,15 @@ export function renderGroupMapImage(mapData, items) {
 
   // Expand the bounding box to cover each pin's ENTIRE row — every segment
   // of the chain findPinRow found, not just a fixed radius around the pin
-  // point. HUOM: ins.y on pöydän ALAREUNA (sama konventio kuin muualla
-  // tässä tiedostossa ja elävässä MapView.jsx:ssä) — pöytä ulottuu siis
-  // ylöspäin ins.y:stä, ei alaspäin.
+  // point. HUOM: ins.y on pöydän YLÄREUNA (todistetusti oikea konventio),
+  // pöytä ulottuu ALASPÄIN siitä.
   highlightIdx.forEach(idx => {
     const ins = mapData.inserts[idx]
     const left = ins.x, right = ins.x + ins.panels * PANEL_W_M * sxm
     if (left < minX) minX = left
     if (right > maxX) maxX = right
-    if (ins.y - th < minY) minY = ins.y - th
-    if (ins.y > maxY) maxY = ins.y
+    if (ins.y < minY) minY = ins.y
+    if (ins.y + th > maxY) maxY = ins.y + th
   })
 
   // Aiemmin marginaali oli hyvin pieni (5 % / kiinteä 6 yksikköä), jolloin
@@ -429,9 +431,9 @@ export function renderGroupMapImage(mapData, items) {
     mctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
     mctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
     mctx.lineWidth = isHi ? 1.6 : 0.6
-    // ins.y = pöydän alareuna, pöytä ulottuu ylöspäin siitä.
-    mctx.fillRect(px(ins.x), py(ins.y) - thpx, tw, thpx)
-    mctx.strokeRect(px(ins.x), py(ins.y) - thpx, tw, thpx)
+    // ins.y = pöydän yläreuna, pöytä ulottuu alaspäin siitä.
+    mctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
+    mctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
   })
 
   mctx.textAlign = 'center'
