@@ -268,29 +268,14 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     y: p.y * H * transform.scale + transform.ty
   }))
 
-  // Rivinumeroiden koko: kasvaa maltillisesti kun zoomataan lähemmäs (max
-  // 20px ruudulla), mutta ei koskaan mene alle luettavan minimin (11px)
-  // kun zoomataan kauas. HUOM: tämä oli tässä tiedostossa jossain vaiheessa
-  // vahingossa palautunut takaisin vanhaan, korjattuun bugiin
-  // (scaledFontSize = 10/scale), joka aiheutti numeroiden paisumisen
-  // jättimäisiksi lähelle zoomatessa ja lähes näkymättömiksi kauas
-  // zoomatessa, koska SVG:n oma CSS-skaalaus kertautui laskennan päälle.
-  //
-  // HUOM 2: kokeiltiin myös siirtää numerolappu sivuun (labelGap) ja
-  // piilottaa osa numeroista törmäystarkistuksella, mutta molemmat
-  // osoittautuivat TARPEETTOMIKSI ja huononsivat lopputulosta viisto-
-  // reunaisilla työmailla — suora, keskitetty sijoittelu DXF:n omaan
-  // tekstipisteeseen (kuten alun perin) toimii itsessään hyvin, koska
-  // työmaan suunnittelija on jo asemoinut numerot järkevästi. Molemmat
-  // lisäykset on siis poistettu, jäljellä on vain oikea kokolaskenta.
-  const desiredLabelPx = Math.max(11, Math.min(20, 11 + Math.log2(Math.max(0.5, transform.scale)) * 4))
-  const labelK = desiredLabelPx / 10 / transform.scale
-  const labelFontSize = 10 * labelK
-  const labelBoxHalfW = 8 * labelK
-  const labelBoxHalfH = 8 * labelK
-  const labelBoxW = 16 * labelK
-  const labelBoxH = 10 * labelK
-  const labelRx = 1 * labelK
+  // Rivinumeroiden fonttikoko — yksinkertainen, käyttäjän itse
+  // käytännössä toimivaksi vahvistama kaava vanhasta, aiemmin hyvin
+  // toimineesta versiosta. Aiemmat yritykset "parantaa" tätä (g-transform,
+  // HTML-elementit, törmäystarkistukset, sivusiirrot) osoittautuivat
+  // toistuvasti huonommiksi käytännön käytössä kuin tämä yksinkertainen
+  // alkuperäinen — joten luotetaan nyt tositestattuun ratkaisuun teorian
+  // sijaan.
+  const scaledFontSize = Math.max(7, Math.min(14, 10 / transform.scale))
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
   return (
@@ -382,26 +367,22 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             )
           })}
 
-          {/* Row numbers - white bg for legibility. Keskitetty suoraan
-              DXF:n omaan tekstipisteeseen (t.x, t.y) — toimii hyvin koska
-              työmaan suunnittelija on jo asemoinut numerot järkevästi
-              rivien päähän myös viistoreunaisilla alueilla. */}
+          {/* Row numbers - white bg for legibility */}
           {rowNumbers.map((t, i) => (
             <g key={`t${i}`}>
               <rect
-                x={t.x - labelBoxHalfW}
-                y={t.y - labelBoxHalfH}
-                width={labelBoxW}
-                height={labelBoxH}
+                x={t.x - 8}
+                y={t.y - 8}
+                width={16}
+                height={10}
                 fill="white"
-                fillOpacity={0.85}
-                rx={labelRx}
+                fillOpacity={0.75}
+                rx={1}
               />
               <text
                 x={t.x}
                 y={t.y}
-                dominantBaseline="middle"
-                fontSize={labelFontSize}
+                fontSize={Math.max(9, scaledFontSize)}
                 fill="#0d1a6e"
                 fontFamily="sans-serif"
                 fontWeight="bold"
