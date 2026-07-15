@@ -296,7 +296,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     const sorted = [...rowLabelDots].sort((a, b) => (a.y - b.y) || (a.x - b.x))
     const kept = []
     for (const d of sorted) {
-      const overlaps = kept.some(k => Math.abs(d.x - k.x) < 26 && Math.abs(d.y - k.y) < 16)
+      const overlaps = kept.some(k => Math.abs(d.x - k.x) < 18 && Math.abs(d.y - k.y) < 12)
       if (!overlaps) kept.push(d)
     }
     return kept
@@ -405,8 +405,8 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
               transform: 'translate(-50%,-50%)',
               background: 'rgba(255,255,255,0.85)',
               color: '#0d1a6e',
-              fontFamily: 'sans-serif', fontWeight: 700, fontSize: 12,
-              padding: '1px 4px', borderRadius: 3,
+              fontFamily: 'sans-serif', fontWeight: 700, fontSize: 9,
+              padding: '0px 3px', borderRadius: 2,
               pointerEvents: 'none', whiteSpace: 'nowrap',
               lineHeight: 1.3,
             }}
