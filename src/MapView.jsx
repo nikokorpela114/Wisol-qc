@@ -268,14 +268,17 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     y: p.y * H * transform.scale + transform.ty
   }))
 
-  // Rivinumeroiden fonttikoko — yksinkertainen, käyttäjän itse
-  // käytännössä toimivaksi vahvistama kaava vanhasta, aiemmin hyvin
-  // toimineesta versiosta. Aiemmat yritykset "parantaa" tätä (g-transform,
-  // HTML-elementit, törmäystarkistukset, sivusiirrot) osoittautuivat
-  // toistuvasti huonommiksi käytännön käytössä kuin tämä yksinkertainen
-  // alkuperäinen — joten luotetaan nyt tositestattuun ratkaisuun teorian
-  // sijaan.
-  const scaledFontSize = Math.max(7, Math.min(14, 10 / transform.scale))
+  // Rivinumeroiden fonttikoko — tavoite on PYSYÄ SAMANKOKOISENA RUUDULLA
+  // zoomista riippumatta (fontSize SVG-yksikköinä × transform.scale = vakio
+  // ruutupikseliä). Aiempi kaava (max(7, min(14, 10/scale)), ja vielä toinen
+  // max(9, …) päällä piirrossa) tarkoitti käytännössä että lattiaraja iski
+  // päälle jo n. 1.1x zoomista alkaen, minkä jälkeen SVG-yksikköinen
+  // fonttikoko pysyi VAKIONA vaikka scale kasvoi — ruutukoko (fontSize×scale)
+  // siis KASVOI RAJATTA zoomatessa (esim. n. 70px korkeat numerot 8x
+  // zoomilla). Poistettu lattiaraja pitää ruutukoon aidosti vakiona; ylempi
+  // 14:n katto säilytetty vain estämään SVG-yksikköarvon räjähtämistä kun
+  // ollaan pahasti uloszoomattuna (scale hyvin pieni).
+  const scaledFontSize = Math.min(14, Math.max(0.8, 10 / transform.scale))
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
   return (
@@ -380,21 +383,23 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
           })}
 
           {/* Row numbers - white bg for legibility */}
-          {rowNumbers.map((t, i) => (
+          {rowNumbers.map((t, i) => {
+            const rw = scaledFontSize * 1.7, rh = scaledFontSize * 1.05
+            return (
             <g key={`t${i}`}>
               <rect
-                x={t.x - 8}
-                y={t.y - 8}
-                width={16}
-                height={10}
+                x={t.x - rw / 2}
+                y={t.y - rh / 2 - scaledFontSize * 0.15}
+                width={rw}
+                height={rh}
                 fill="white"
                 fillOpacity={0.75}
-                rx={1}
+                rx={Math.max(0.3, scaledFontSize * 0.1)}
               />
               <text
                 x={t.x}
                 y={t.y}
-                fontSize={Math.max(9, scaledFontSize)}
+                fontSize={scaledFontSize}
                 fill="#0d1a6e"
                 fontFamily="sans-serif"
                 fontWeight="bold"
@@ -403,7 +408,8 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
                 {t.text}
               </text>
             </g>
-          ))}
+            )
+          })}
         </svg>
 
         {/* GPS dot overlay */}
