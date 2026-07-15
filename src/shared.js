@@ -105,26 +105,6 @@ export function findPinRow(mapData, pin) {
   if (hitIdx < 0) return null
   const hit = mapData.inserts[hitIdx]
 
-  // 1b. Mitataan TODELLINEN rivi-väli tällä alueella heti, hit.x:n
-  //     ympäriltä — käytetään sitä JOHDONMUKAISESTI kaikkialla (rowY,
-  //     targetY, labelYTol) kiinteän th:n (TABLE_DEPTH_M-oletus) sijaan.
-  //     Aiemmin th:tä käytettiin rowY/targetY:hen mutta localPitch:iä vain
-  //     labelYTol:iin — tämä epäjohdonmukaisuus sai targetY:n osumaan
-  //     väärään kohtaan aina kun todellinen väli poikkesi th:sta, mikä
-  //     työnsi oikean numerolapun tiukan labelYTol-kaistan ulkopuolelle ja
-  //     haku napsahti sen sijaan johonkin kauempana olevaan, väärään
-  //     numeroon — juuri tämä aiheutti tulosten "hyppimisen" pienestäkin
-  //     napautuskohdan muutoksesta.
-  const pitchWindow = mapData.rowNumbers.filter(t => Math.abs(t.x - hit.x) < th * 8)
-  const pitchYs = [...new Set(pitchWindow.map(t => Math.round(t.y * 100) / 100))].sort((a, b) => b - a)
-  let localPitch = th
-  if (pitchYs.length >= 2) {
-    const gaps = []
-    for (let i = 0; i < pitchYs.length - 1; i++) gaps.push(pitchYs[i] - pitchYs[i + 1])
-    gaps.sort((a, b) => a - b)
-    localPitch = gaps[Math.floor(gaps.length / 2)] // mediaani
-  }
-
   // 2. Kerää looginen rivi = lohkot samalla Y-korkeudella JA X-suunnassa
   //    peräkkäin. Pelkkä Y-korkeus ei riitä: jos rivi katkeaa esim. tien
   //    (Road 03/04) kohdalla, tien toisella puolella oleva lohko voi sattua
@@ -143,22 +123,8 @@ export function findPinRow(mapData, pin) {
   // eri fyysiset rivit samaksi ketjuksi. Toleranssi on siksi tiukka — vain
   // saman rivin omien lohkojen pieni mittausvaihtelu, ei naapuririvin väli.
   const yTol = th * 0.25
-  // HUOM: tätä nostettiin kerran 6:sta 45:een yhden erikoistapauksen takia
-  // (laillinen ~48 yksikön huoltokäytävä saman rivin sisällä, joka ei
-  // ketjuttunut yhteen 6:lla). Se osoittautui kenttätestissä pahemmaksi
-  // regressioksi kuin ongelma jota se yritti korjata: 45 on isompi kuin se
-  // JO KERRAN todistetusti rikkinäinen 25 yksikön arvo, joten se ketjutti
-  // taas eri rivejä yhteen väärillä rivinumeroilla JA venytti
-  // renderGroupMapImage:n rajausta kattamaan aivan liian ison alueen
-  // (havaittu: sekava/liian kaukaa otettu yhteiskarttakuva). Palautettu
-  // takaisin 6:een. "gap >= -1" -tarkistus estää vain PÄÄLLEKKÄISTEN
-  // lohkojen ketjuttamisen, ei sitä että kaksi ERI mutta samalla
-  // korkeudella olevaa riviä ketjuutuu ilman piirrettyä tie-/aluerajaa
-  // niiden välissä — se yksittäinen huoltokäytävätapaus pitää ratkaista
-  // tarkemmalla logiikalla (esim. tarkistamalla että molemmin puolin
-  // löytyy sama rivinumero) myöhemmin, ei laajentamalla tätä globaalisti.
-  const gapTol = 6 * sxm
-  const rowY = hit.y - localPitch / 2
+  const gapTol = 25 * sxm // reilusti isompi kuin tavallinen pöytäväli, jotta rivin sisäiset huoltokäytävät ym. eivät katkaise ketjua turhaan
+  const rowY = hit.y - th / 2
 
   // Tarkistaa kulkeeko jokin "raja-viiva" kahden lohkon välistä. Tähän
   // lasketaan sekä tiet (mapData.roads) että aluerajat — dxfParser.js lukee
@@ -191,43 +157,48 @@ export function findPinRow(mapData, pin) {
     .sort((a, b) => a.left - b.left)
 
   const hitPos = sameY.findIndex(e => e.idx === hitIdx)
-
-  // HUOM: kokeiltiin aiemmin erillistä "ohita tie numeron haussa" -ketjua,
-  // mutta se osoittautui vääräksi — tiet OIKEASTI rajoittavat rivejä
-  // useilla alueilla (havaittu suoraan kartalta: pinni tien toisella
-  // puolella löysi väärän, kaukaisen rivin numeron kun tie-tarkistus
-  // ohitettiin). Käytetään siis yhtä ja samaa tie-/aluerajan huomioivaa
-  // ketjua sekä korostukseen että numeron hakuun — jos jollain TOISELLA
-  // työmaalla rivi oikeasti jatkuu saman numeroisena tien yli, se pitää
-  // ratkaista erikseen (esim. tarkistamalla onko molemmin puolin sama
-  // numero), ei sivuuttamalla tie-tarkistus kokonaan kaikkialla.
   const chain = [sameY[hitPos]]
   for (let i = hitPos - 1; i >= 0; i--) {
     const edge = chain[0].left
-    const gap = edge - sameY[i].right
-    // gap < -1: lohkot ovat selvästi päällekkäin (esim. DXF:n duplikoitu/
-    // limittyvä data) — ei ketjuteta tällaisen läpi.
-    if (gap >= -1 && gap <= gapTol && !crossesBoundary(sameY[i].right, edge)) chain.unshift(sameY[i])
+    if (sameY[i].right >= edge - gapTol && !crossesBoundary(sameY[i].right, edge)) chain.unshift(sameY[i])
     else break
   }
   for (let i = hitPos + 1; i < sameY.length; i++) {
     const edge = chain[chain.length - 1].right
-    const gap = sameY[i].left - edge
-    if (gap >= -1 && gap <= gapTol && !crossesBoundary(edge, sameY[i].left)) chain.push(sameY[i])
+    if (sameY[i].left <= edge + gapTol && !crossesBoundary(edge, sameY[i].left)) chain.push(sameY[i])
     else break
   }
 
   // 3. Rivin oma oikea reuna = suurin (ins.x + leveys) vain ketjuun kuuluvista lohkoista
   const rowRightX = Math.max(...chain.map(e => e.right))
   const targetX = rowRightX
-  const targetY = hit.y - localPitch / 2
+  const targetY = hit.y - th / 2
 
   // 4. Etsi lähin numerolappu VAIN saman Y-kaistan sisältä, ja hylkää jos
   //    lähinkin on epäuskottavan kaukana (esim. toiselta puolelta karttaa).
-  //    localPitch (mitattu vaiheessa 1b) käytetään sekä targetY:n keskitykseen
-  //    että toleranssin pohjana — molemmat käyttävät nyt SAMAA mitattua
-  //    riviväliä, ei kiinteää TABLE_DEPTH_M-oletusta, jotta ne eivät voi
-  //    ajautua ristiriitaan keskenään.
+  //
+  //    HUOM (löydetty DXF-datasta suoraan): joillain työmaan alueilla
+  //    paneelipöydät on kierretty (esim. block-nimessä "@30DEG"), jolloin
+  //    niiden todellinen Y-suuntainen rivi-väli EI vastaa kiinteää
+  //    TABLE_DEPTH_M (4.29 m) -oletusta — mitattu esimerkki: todellinen
+  //    väli oli ~10.0 yksikköä, yli 2× suurempi kuin th. Kiinteä
+  //    th-pohjainen toleranssi oli tällöin liian tiukka ja "Havaittu rivi"
+  //    katosi kokonaan tällaisilla kierretyillä alueilla. Sen sijaan että
+  //    luotettaisiin kiinteään th:hon, mitataan TODELLINEN rivi-väli
+  //    dynaamisesti lähialueen numerolapuista (erotus kahden lähimmän
+  //    ERI-Y:n lapun välillä samalla X-kaistalla) ja käytetään sitä
+  //    toleranssin pohjana — tämä mukautuu automaattisesti sekä normaaleihin
+  //    että kierrettyihin alueisiin ilman että pöytien piirtoa (joka
+  //    edelleen jättää kierron huomiotta) tarvitsee korjata erikseen.
+  const nearbyLabelsX = mapData.rowNumbers.filter(t => Math.abs(t.x - targetX) < th * 6)
+  const distinctYs = [...new Set(nearbyLabelsX.map(t => Math.round(t.y * 100) / 100))].sort((a, b) => b - a)
+  let localPitch = th // fallback jos alle 2 lappua löytyy lähialueelta
+  if (distinctYs.length >= 2) {
+    const gaps = []
+    for (let i = 0; i < distinctYs.length - 1; i++) gaps.push(distinctYs[i] - distinctYs[i + 1])
+    gaps.sort((a, b) => a - b)
+    localPitch = gaps[Math.floor(gaps.length / 2)] // mediaani kestää yksittäiset poikkeamat paremmin kuin min/ka
+  }
   const labelYTol = Math.max(th * 0.6, localPitch * 0.45)
   const maxLabelDist = Math.max(th * 4, localPitch * 3)
   let best = Infinity, label = null
@@ -236,7 +207,6 @@ export function findPinRow(mapData, pin) {
     const d = Math.hypot(t.x - targetX, t.y - targetY)
     if (d < best) { best = d; label = t.text }
   })
-  const strictLabel = label, strictBest = best
   // Fallback: jos tiukka Y-kaista ei löydä yhtään lappua (esim. label on
   // hieman odotettua kauempana Y-suunnassa jollain työmaalla), etsitään
   // lähin lappu ILMAN Y-kaistarajoitusta mutta silti maxLabelDist-säteen
@@ -247,16 +217,16 @@ export function findPinRow(mapData, pin) {
       const d = Math.hypot(t.x - targetX, t.y - targetY)
       if (d < best2) { best2 = d; label2 = t.text }
     })
+    const nearest5 = mapData.rowNumbers
+      .map(t => ({ text: t.text, x: t.x, y: t.y, d: Math.hypot(t.x - targetX, t.y - targetY), dy: t.y - targetY }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 6)
+    console.log('[findPinRow debug] targetX=' + targetX.toFixed(1) + ' targetY=' + targetY.toFixed(1) + ' labelYTol=' + labelYTol.toFixed(1) + ' maxLabelDist=' + maxLabelDist.toFixed(1))
+    console.log('[findPinRow debug] strictBest=' + best + ' strictLabel=' + label + ' fallbackBest=' + best2.toFixed(1) + ' fallbackLabel=' + label2)
+    console.log('[findPinRow debug] lähimmät 6 numerolappua (text, x, y, etäisyys d, Y-ero dy):')
+    nearest5.forEach(n => console.log('  ' + n.text + '  x=' + n.x.toFixed(1) + ' y=' + n.y.toFixed(1) + ' d=' + n.d.toFixed(1) + ' dy=' + n.dy.toFixed(1)))
     if (label2 && best2 <= maxLabelDist * 1.5) { best = best2; label = label2 }
   }
-  // TILAPÄINEN DEBUG — näyttää lopullisen (fallbackin jälkeisen) tuloksen
-  console.log('[findPinRow] pin=(' + psx.toFixed(1) + ',' + psy.toFixed(1) + ') hitIdx=' + hitIdx +
-    ' hit=(' + hit.x.toFixed(1) + ',' + hit.y.toFixed(1) + ') chainLen=' + chain.length +
-    ' chainX=[' + chain.map(e => e.left.toFixed(0) + '-' + e.right.toFixed(0)).join(',') + ']' +
-    ' targetX=' + targetX.toFixed(1) + ' targetY=' + targetY.toFixed(1) +
-    ' localPitch=' + localPitch.toFixed(2) + ' labelYTol=' + labelYTol.toFixed(2) +
-    ' strict->' + strictLabel + '@' + strictBest.toFixed(1) +
-    ' FINAL->' + label + '@' + best.toFixed(1))
   if (!label || best > maxLabelDist * 1.5) return null
 
   // Palautetaan myös koko rivin (ketjun) lohkojen indeksit — näitä tarvitaan
@@ -459,32 +429,4 @@ export function renderGroupMapImage(mapData, items) {
   })
 
   return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), outW, outH, rowLabels }
-}
-
-// Downscale + re-encode an image file straight away. Raw phone photos can be
-// several MB — compressing to a reasonable max dimension keeps PDF exports
-// and Supabase storage light. Used by both App.jsx (havainnon omat kuvat)
-// and InstallerView.jsx (korjauskuva).
-export function compressImage(file, maxDim = 1600, quality = 0.75) {
-  return new Promise(resolve => {
-    const reader = new FileReader()
-    reader.onload = e => {
-      const img = new Image()
-      img.onload = () => {
-        let { width, height } = img
-        if (width > maxDim || height > maxDim) {
-          const scale = maxDim / Math.max(width, height)
-          width = Math.round(width * scale); height = Math.round(height * scale)
-        }
-        const c = document.createElement('canvas')
-        c.width = width; c.height = height
-        c.getContext('2d').drawImage(img, 0, 0, width, height)
-        resolve(c.toDataURL('image/jpeg', quality))
-      }
-      img.onerror = () => resolve(e.target.result)
-      img.src = e.target.result
-    }
-    reader.onerror = () => resolve(null)
-    reader.readAsDataURL(file)
-  })
 }

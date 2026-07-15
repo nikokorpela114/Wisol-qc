@@ -300,13 +300,8 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             )
           })}
 
-          {/* Row numbers - white bg for legibility. Piilotetaan kokonaan kun
-              zoomaus on liian kaukana (esim. koko työmaa yhdellä kertaa
-              näkyvissä) — silloin rivit ovat niin lähekkäin että labelit
-              menevät päällekkäin ja muuttuvat lukukelvottomaksi sotkuksi.
-              Ne eivät myöskään ole hyödyllisiä ennen kuin on zoomattu
-              tarpeeksi lähelle nähdäkseen mihin riviin ollaan osumassa. */}
-          {transform.scale > 0.35 && rowNumbers.map((t, i) => (
+          {/* Row numbers - white bg for legibility */}
+          {rowNumbers.map((t, i) => (
             <g key={`t${i}`}>
               <rect
                 x={t.x - 8}
