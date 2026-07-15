@@ -3,29 +3,94 @@ import React, { useRef, useEffect, useState, useCallback } from 'react'
 const PANEL_W_M = 1.15   // meters per panel (width along X)
 const TABLE_DEPTH_M = 4.29  // meters deep (Y direction, always fixed)
 
-export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, readOnly = false, extraPins = [] }) {
+// HUOM: käytetään SAMAA tyhjää taulukkoa oletusarvona joka renderöinnillä.
+// Jos oletusarvo olisi kirjoitettu suoraan `focusPins = []` parametrina,
+// JavaScript loisi UUDEN taulukko-olion joka ikinen renderöinti — vaikka
+// sisältö on aina tyhjä, olion REFERENSSI muuttuu, mikä sai alla olevan
+// useEffect-riippuvuuslistan [W, H, focusPins] laukeamaan uudelleen JOKA
+// renderöinnillä. Se puolestaan resetoi näkymän takaisin alkuperäiseksi
+// välittömästi käyttäjän oman panoroinnin/zoomauksen jälkeen, jolloin
+// karttaa ei voinut enää liikuttaa itse ollenkaan.
+const EMPTY_PINS = []
+
+export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, readOnly = false, extraPins = EMPTY_PINS, onViewChange, focusPins = EMPTY_PINS }) {
   const containerRef = useRef(null)
   const [transform, setTransform] = useState({ scale: 1, tx: 0, ty: 0 })
   const stateRef = useRef({ scale: 1, tx: 0, ty: 0 })
+  const autoCenteredRef = useRef(false) // estää GPS-keskityksen toistumisen/ohittamisen käyttäjän oman panoroinnin jälkeen
 
   const { W, H, pvAreas, roads, boundaries, inserts, rowNumbers, minX, minY, maxX, maxY } = mapData
 
-  // Init: fit map in container
+  // Sovittaa näkymän annettujen pisteiden (normalisoitu 0..1) ympärille,
+  // reilulla marginaalilla — käytetään sekä asentajan yleiskartan
+  // "kohdista vikojen alueeseen" -toiminnossa (focusPins) että se on
+  // yleiskäyttöinen apu jota voi hyödyntää muuallakin jatkossa.
+  function fitToPoints(points, cw, ch) {
+    const xs = points.map(p => p.x * W), ys = points.map(p => p.y * H)
+    const minPX = Math.min(...xs), maxPX = Math.max(...xs)
+    const minPY = Math.min(...ys), maxPY = Math.max(...ys)
+    const w = Math.max(1, maxPX - minPX), h = Math.max(1, maxPY - minPY)
+    // Kiinteä minimimarginaali (esim. yhden pisteen tapaus, w/h≈0) plus
+    // suhteellinen marginaali isommille alueille.
+    const padX = Math.max(40, w * 0.35), padY = Math.max(40, h * 0.35)
+    const bw = w + 2 * padX, bh = h + 2 * padY
+    const scale = Math.min(8, Math.max(0.3, Math.min(cw / bw, ch / bh)))
+    const cx = (minPX + maxPX) / 2, cy = (minPY + maxPY) / 2
+    return { scale, tx: cw / 2 - cx * scale, ty: ch / 2 - cy * scale }
+  }
+
+  // Init: fit map in container — joko koko työmaan mukaan (oletus) tai
+  // focusPins-pisteiden ympärille (asentajan yleiskartta, "kohdista
+  // vikojen alueeseen" jottei tarvitse itse zoomata koko työmaasta).
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     const cw = el.clientWidth, ch = el.clientHeight
-    const scale = Math.min(cw / W, ch / H) * 0.95
-    const tx = (cw - W * scale) / 2
-    const ty = (ch - H * scale) / 2
-    stateRef.current = { scale, tx, ty }
-    setTransform({ scale, tx, ty })
-  }, [W, H])
+    let s
+    if (focusPins.length > 0) {
+      s = fitToPoints(focusPins, cw, ch)
+    } else {
+      const scale = Math.min(cw / W, ch / H) * 0.95
+      s = { scale, tx: (cw - W * scale) / 2, ty: (ch - H * scale) / 2 }
+    }
+    stateRef.current = s
+    setTransform(s)
+    // PDF:n yksittäiskartturi (App.jsx) lukee o.mapView.containerW/H, joten
+    // välitetään myös kontin mitat, ei pelkkää scale/tx/ty:tä.
+    if (onViewChange) onViewChange({ ...s, containerW: cw, containerH: ch })
+  }, [W, H, focusPins])
+
+  // Kertaluontoinen GPS-keskitys UUDELLE (pin=null) havainnolle — ilman
+  // tätä työnjohtaja joutui aina zoomailemaan/etsimään itsensä koko
+  // työmaan kartalta. Kun GPS-sijainti ensimmäisen kerran saadaan, ja
+  // havainnolla ei vielä ole pinniä eikä focusPins-tilaa ole käytössä
+  // (silloin alustus hoiti jo kohdistuksen), keskitetään näkymä lähelle
+  // omaa sijaintia kohtuullisen läheisellä zoomilla. Tämä tapahtuu vain
+  // KERRAN (autoCenteredRef) — ei väkisin vedä näkymää takaisin jos
+  // käyttäjä on jo ehtinyt itse panoroida/zoomata (merkitään "käytetyksi"
+  // myös manuaalisen vuorovaikutuksen alkaessa, ks. alempana).
+  useEffect(() => {
+    if (autoCenteredRef.current || pin || focusPins.length > 0 || !gpsCoords) return
+    const el = containerRef.current
+    if (!el) return
+    autoCenteredRef.current = true
+    const cw = el.clientWidth, ch = el.clientHeight
+    const scale = Math.min(8, Math.max(1.5, Math.min(cw / W, ch / H) * 5))
+    const gx = gpsCoords.x * W, gy = gpsCoords.y * H
+    const s = clamp({ scale, tx: cw / 2 - gx * scale, ty: ch / 2 - gy * scale })
+    stateRef.current = s
+    setTransform(s)
+    if (onViewChange) onViewChange({ ...s, containerW: cw, containerH: ch })
+  }, [gpsCoords, pin])
 
   const applyTransform = useCallback((s) => {
     stateRef.current = s
     setTransform({ ...s })
-  }, [])
+    if (onViewChange) {
+      const el = containerRef.current
+      onViewChange({ ...s, containerW: el?.clientWidth, containerH: el?.clientHeight })
+    }
+  }, [onViewChange])
 
   const clamp = useCallback((s) => {
     const el = containerRef.current
@@ -45,6 +110,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
 
   const onTouchStart = useCallback((e) => {
     e.preventDefault()
+    autoCenteredRef.current = true // käyttäjä koski karttaa itse — GPS-autokeskitys ei saa enää yrittää vetää näkymää
     const s = stateRef.current
     if (e.touches.length === 1) {
       touchRef.current = {
@@ -124,6 +190,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
 
   const onMouseDown = useCallback((e) => {
     if (e.target.tagName === 'BUTTON') return
+    autoCenteredRef.current = true
     const s = stateRef.current
     mouseRef.current = { startX: e.clientX, startY: e.clientY, tx: s.tx, ty: s.ty, moved: false }
   }, [])
@@ -156,6 +223,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
   // --- Desktop scroll wheel zoom ---
   const onWheel = useCallback((e) => {
     e.preventDefault()
+    autoCenteredRef.current = true
     const el = containerRef.current
     if (!el) return
     const s = stateRef.current
@@ -200,8 +268,39 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     y: p.y * H * transform.scale + transform.ty
   }))
 
-  // Scale for text readability
-  const scaledFontSize = Math.max(7, Math.min(14, 10 / transform.scale))
+  // Rivinumerot lasketaan RUUTUPIKSELEINÄ (samaan tapaan kuin gpsDot/pinDot
+  // yllä), EI SVG:n sisäisenä fontSize-arvona. Tämä on toinen kierros
+  // samaan ongelmaan: "yksinkertainen" scaledFontSize = 10/scale -kaava
+  // NÄYTTI toimivan yhdessä tietyssä zoomitilanteessa (referenssikuva),
+  // mutta se on täsmälleen se alkuperäinen bugi josta koko tämä korjaus-
+  // sarja lähti liikkeelle — lähelle zoomatessa (scale iso) paikallinen
+  // arvo menee pieneksi mutta SVG:n oma CSS-skaalaus (scale(transform.scale))
+  // kertoo sen takaisin isoksi, ja numerot paisuvat jättimäisiksi ja
+  // menevät päällekkäin. Kun laatikko lasketaan suoraan lopulliseksi
+  // ruutupikseliksi (kuten pin/GPS-pisteet), koko pysyy AINA samana
+  // riippumatta zoomista — ei voi koskaan mennä liian isoksi eikä liian
+  // pieneksi, riippumatta miten kauas tai lähelle zoomataan.
+  const rowLabelDots = rowNumbers.map(t => ({
+    x: t.x * transform.scale + transform.tx,
+    y: t.y * transform.scale + transform.ty,
+    text: t.text,
+  }))
+  // Päällekkäisyyssuoja — kun kaukaa zoomatessa satoja kiinteän kokoisia
+  // lappuja ajautuu lähelle toisiaan, ne muuttuvat luettavan numeron
+  // sijaan tiheäksi "kohinakuvioksi". Koska sijainnit ovat jo tässä
+  // vaiheessa LOPULLISIA ruutupikseleitä, päällekkäisyys voidaan
+  // tarkistaa suoraan ja luotettavasti: piilotetaan vain ne yksittäiset
+  // laput jotka oikeasti osuisivat kiinni jo näytettäväksi valittuun
+  // naapuriinsa — rivit joilla on tilaa näkyvät aina normaalisti.
+  const visibleRowLabelDots = (() => {
+    const sorted = [...rowLabelDots].sort((a, b) => (a.y - b.y) || (a.x - b.x))
+    const kept = []
+    for (const d of sorted) {
+      const overlaps = kept.some(k => Math.abs(d.x - k.x) < 18 && Math.abs(d.y - k.y) < 12)
+      if (!overlaps) kept.push(d)
+    }
+    return kept
+  })()
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
   return (
@@ -273,47 +372,48 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             const scaleYm = H / (maxY - minY)
             const tw = ins.panels * PANEL_W_M * scaleXm
             const th = TABLE_DEPTH_M * scaleYm
+            // HUOM: block-nimen "@30DEG" on paneelin ASENNUS-/KALLISTUSKULMA
+            // (kuinka jyrkässä kulmassa paneeli on aurinkoon nähden), EI
+            // pöydän kiertoa pohjapiirroksen X/Y-tasossa. Tämä tulkittiin
+            // aiemmin virheellisesti tasokierroksi, mikä siirsi/limitti
+            // pöytiä väärin — siksi ins.rot:ia EI käytetä piirrossa.
             return (
               <rect
                 key={`ins${i}`}
                 x={ins.x}
-                y={ins.y - th}
+                y={ins.y}
                 width={tw}
                 height={th}
                 fill="#1a2fcc"
-                fillOpacity={0.18}
+                fillOpacity={0.32}
                 stroke="#1a2fcc"
                 strokeWidth={strokeW * 0.5}
               />
             )
           })}
 
-          {/* Row numbers - white bg for legibility */}
-          {rowNumbers.map((t, i) => (
-            <g key={`t${i}`}>
-              <rect
-                x={t.x - 8}
-                y={t.y - 8}
-                width={16}
-                height={10}
-                fill="white"
-                fillOpacity={0.75}
-                rx={1}
-              />
-              <text
-                x={t.x}
-                y={t.y}
-                fontSize={Math.max(9, scaledFontSize)}
-                fill="#0d1a6e"
-                fontFamily="sans-serif"
-                fontWeight="bold"
-                textAnchor="middle"
-              >
-                {t.text}
-              </text>
-            </g>
-          ))}
         </svg>
+
+        {/* Row number labels — HTML-elementteinä, kiinteä CSS-pikselikoko.
+            EI koskaan SVG:n sisällä, jotta koko pysyy aina samana zoomista
+            riippumatta (ks. rowLabelDots-laskennan selitys yllä). */}
+        {visibleRowLabelDots.map((d, i) => (
+          <div
+            key={`rl${i}`}
+            style={{
+              position: 'absolute', left: d.x, top: d.y,
+              transform: 'translate(-50%,-50%)',
+              background: 'rgba(255,255,255,0.85)',
+              color: '#0d1a6e',
+              fontFamily: 'sans-serif', fontWeight: 700, fontSize: 9,
+              padding: '0px 3px', borderRadius: 2,
+              pointerEvents: 'none', whiteSpace: 'nowrap',
+              lineHeight: 1.3,
+            }}
+          >
+            {d.text}
+          </div>
+        ))}
 
         {/* GPS dot overlay */}
         {gpsDot && (
@@ -387,5 +487,4 @@ const zoomBtnStyle = {
   borderRadius: 7,
   fontSize: 20, fontWeight: 600,
   display: 'flex', alignItems: 'center', justifyContent: 'center',
-  color: '#333'
-}
+  color: '#333
