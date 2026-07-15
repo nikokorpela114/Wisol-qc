@@ -6,7 +6,7 @@ import { sb } from './supabaseClient.js'
 import InstallerView from './InstallerView.jsx'
 import Dashboard from './Dashboard.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
-import { KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage } from './shared.js'
+import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow } from './shared.js'
 
 const CATS = [
   'Paneeli rikkoutunut', 'Paneeli väärinpäin, yläreuna', 'Paneeli väärinpäin, alareuna',
@@ -19,6 +19,105 @@ const CATS = [
 
 let idCounter = 0
 const DRAFT_KEY = 'wisol_qc_draft_v1'
+
+// Renders one combined map image containing ALL pins from `items` (a list of
+// observations that share a fault category), so an installer can see every
+// occurrence of that fault on one picture instead of paging through a
+// separate map per observation. Crops to a bounding box that covers all the
+// pins (plus padding), highlights every row that contains at least one pin,
+// and draws each pin as a small numbered circle (1, 2, 3…) matching the
+// numbered list printed under the image in the PDF.
+function renderGroupMapImage(mapData, items) {
+  const sxm = mapData.W / (mapData.maxX - mapData.minX)
+  const sym = mapData.H / (mapData.maxY - mapData.minY)
+  const th = TABLE_DEPTH_M * sym
+
+  const pins = items.map(o => ({ x: o.pin.x * mapData.W, y: o.pin.y * mapData.H }))
+
+  // Find each pin's full row (using the shared, bug-fixed findPinRow) once,
+  // and reuse it both for highlighting and for sizing the crop.
+  const rowInfos = items.map(o => findPinRow(mapData, o.pin))
+  const highlightIdx = new Set()
+  const rowLabels = rowInfos.map(info => {
+    if (info) info.rowInsertIdxs.forEach(idx => highlightIdx.add(idx))
+    return info ? info.label : null
+  })
+
+  let minX = Math.min(...pins.map(p => p.x)), maxX = Math.max(...pins.map(p => p.x))
+  let minY = Math.min(...pins.map(p => p.y)), maxY = Math.max(...pins.map(p => p.y))
+
+  // Expand the bounding box to cover each pin's ENTIRE row — every segment
+  // of the chain findPinRow found, not just a fixed radius around the pin
+  // point. A "zoomed enough to see the pin clearly" crop showed only one
+  // anonymous colour block with no row number and no sense of where along
+  // a long row it sat. Showing the whole row (segments + its number label)
+  // instead always gives that context, at the cost of a wider image when
+  // the row itself is long — which is the correct trade-off here.
+  highlightIdx.forEach(idx => {
+    const ins = mapData.inserts[idx]
+    const left = ins.x, right = ins.x + ins.panels * PANEL_W_M * sxm
+    if (left < minX) minX = left
+    if (right > maxX) maxX = right
+    if (ins.y < minY) minY = ins.y
+    if (ins.y + th > maxY) maxY = ins.y + th
+  })
+
+  // Small, mostly fixed margin now — the crop width is already driven by
+  // the row's real extent, not by guesswork padding.
+  const padX = Math.max(6 * sxm, (maxX - minX) * 0.05)
+  const padY = Math.max(9 * sym, (maxY - minY) * 0.2)
+  const svgX0 = Math.max(0, minX - padX)
+  const svgY0 = Math.max(0, minY - padY)
+  const svgX1 = Math.min(mapData.W, maxX + padX)
+  const svgY1 = Math.min(mapData.H, maxY + padY)
+  const svgCropW = Math.max(1, svgX1 - svgX0), svgCropH = Math.max(1, svgY1 - svgY0)
+
+  const outW = 1400, outH = Math.round(outW * svgCropH / svgCropW)
+  const canvas = document.createElement('canvas')
+  canvas.width = outW; canvas.height = outH
+  const mctx = canvas.getContext('2d')
+  mctx.fillStyle = '#eef4ec'; mctx.fillRect(0, 0, outW, outH)
+  const kx = outW / svgCropW, ky = outH / svgCropH
+  const px = sx => (sx - svgX0) * kx, py = sy => (sy - svgY0) * ky
+
+  mctx.fillStyle = 'rgba(200,223,245,0.85)'; mctx.strokeStyle = '#4a90d9'; mctx.lineWidth = 1.2
+  mapData.pvAreas.forEach(pts => {
+    mctx.beginPath(); pts.forEach(([x, y2], i) => i === 0 ? mctx.moveTo(px(x), py(y2)) : mctx.lineTo(px(x), py(y2)))
+    mctx.closePath(); mctx.fill(); mctx.stroke()
+  })
+
+  mapData.inserts.forEach((ins, idx) => {
+    const tw = ins.panels * PANEL_W_M * sxm * kx
+    const thpx = TABLE_DEPTH_M * sym * ky
+    const isHi = highlightIdx.has(idx)
+    mctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
+    mctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
+    mctx.lineWidth = isHi ? 1.6 : 0.6
+    mctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
+    mctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
+  })
+
+  mctx.textAlign = 'center'
+  mapData.rowNumbers.forEach(t => {
+    mctx.font = 'bold 12px sans-serif'
+    mctx.fillStyle = 'rgba(255,255,255,0.75)'
+    mctx.fillRect(px(t.x) - 9, py(t.y) - 9, 18, 12)
+    mctx.fillStyle = '#0d1a6e'
+    mctx.fillText(t.text, px(t.x), py(t.y) + 1)
+  })
+
+  // Numbered pins — number matches the item list printed below the image.
+  pins.forEach((p, i) => {
+    const cx = px(p.x), cy = py(p.y)
+    mctx.beginPath(); mctx.arc(cx, cy, 11, 0, Math.PI * 2)
+    mctx.fillStyle = '#d63030'; mctx.fill()
+    mctx.strokeStyle = 'white'; mctx.lineWidth = 2; mctx.stroke()
+    mctx.font = 'bold 13px sans-serif'; mctx.fillStyle = 'white'
+    mctx.fillText(String(i + 1), cx, cy + 4)
+  })
+
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), outW, outH, rowLabels }
+}
 
 export default function App() {
   // ?asentaja avaa karsitun asentajanäkymän tämän saman appin sisällä —
@@ -45,7 +144,7 @@ export default function App() {
   const [pdfBlob, setPdfBlob] = useState(null)
   const [pdfName, setPdfName] = useState('')
   const [pdfDownloaded, setPdfDownloaded] = useState(false)
-  const [groupByCategory, setGroupByCategory] = useState(false)
+  const [groupByCategory, setGroupByCategory] = useState(true) // oletuksena päällä: samat vikatyypit yhdistetään aina samaan karttakuvaan PDF:ssä
   const [isOnline, setIsOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine)
   const [installers, setInstallers] = useState([])
   const [teams, setTeams] = useState([])
@@ -350,7 +449,6 @@ export default function App() {
       const clone = {
         id, cat: o.cat, sev: o.sev, note: '', muu: o.muu, photos: [],
         pin, db_id: null, createdAt: new Date().toISOString(),
-        clonedFrom: o.id,
       }
       setObs(prev => [...prev, clone])
       saveObs(clone, site, inspector, rivi)
@@ -918,7 +1016,6 @@ export default function App() {
                       onPin={pin => handleMapTap(o, pin)}
                       gpsCoords={gpsCoords}
                       onViewChange={view => setMapView(o.id, view)}
-                      extraPins={quickAddId === o.id ? obs.filter(x => x.clonedFrom === o.id).map(x => x.pin) : []}
                     />
                     {o.pin && (() => {
                       const r = findPinRow(mapData, o.pin)
