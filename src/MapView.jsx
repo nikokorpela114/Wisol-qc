@@ -486,5 +486,13 @@ const zoomBtnStyle = {
   border: '1px solid #ccc',
   borderRadius: 7,
   fontSize: 20, fontWeight: 600,
+  display: 'flex', alignItems: 'center', justifyContent: 'const zoomBtnStyle = {
+  width: 32, height: 32,
+  background: 'rgba(255,255,255,0.92)',
+  border: '1px solid #ccc',
+  borderRadius: 7,
+  fontSize: 20, fontWeight: 600,
   display: 'flex', alignItems: 'center', justifyContent: 'center',
-  color: '#333
+  color: '#333'
+}
+
