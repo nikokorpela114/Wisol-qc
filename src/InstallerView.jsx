@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
-import { KNOWN_SITES, findPinRow, renderPinMapThumb, CAT_EN, SEV_EN } from './shared.js'
+import { KNOWN_SITES, findPinRow, renderPinMapThumb, CAT_EN, SEV_EN, compressImage } from './shared.js'
 import { subscribeToPush, sendPushNotification } from './push.js'
 
 const SESSION_KEY = 'wisol_installer_session'
@@ -26,6 +26,8 @@ export default function InstallerView() {
   const [pushMsg, setPushMsg] = useState('')
   const [fixedBatch, setFixedBatch] = useState([]) // korjatut mutta ei vielä kuitatut asentajan istunnossa
   const [confirmMsg, setConfirmMsg] = useState('')
+  const [fixPhotos, setFixPhotos] = useState({}) // { [observation.id]: dataUrl } — pakollinen korjauskuva ennen "Merkitse korjatuksi"
+  const [photoBusy, setPhotoBusy] = useState({}) // { [id]: true } kun kuvaa vielä pakataan
 
   const t = key => {
     const dict = {
@@ -44,6 +46,10 @@ export default function InstallerView() {
       row: { fi: 'rivi', en: 'row' },
       confirmBatch: { fi: 'Kuittaa työnjohtajalle', en: 'Confirm to supervisor' },
       fixedCount: { fi: 'korjattu, ei vielä lähetetty', en: 'fixed, not sent yet' },
+      addFixPhoto: { fi: '📷 Ota korjauskuva', en: '📷 Take fix photo' },
+      retakeFixPhoto: { fi: '📷 Ota uusi kuva', en: '📷 Retake photo' },
+      needPhoto: { fi: 'Ota kuva korjauksesta ennen kuin voit merkitä sen korjatuksi', en: 'Take a photo of the fix before marking it done' },
+      compressing: { fi: 'Käsitellään kuvaa…', en: 'Processing photo…' },
     }
     return dict[key]?.[lang] ?? key
   }
@@ -173,16 +179,38 @@ export default function InstallerView() {
     setPushMsg(res.ok ? t('notifOnDone') : (res.reason || 'Ei onnistunut'))
   }
 
+  async function addFixPhoto(id, file) {
+    if (!file) return
+    setPhotoBusy(prev => ({ ...prev, [id]: true }))
+    const src = await compressImage(file)
+    setPhotoBusy(prev => ({ ...prev, [id]: false }))
+    if (src) setFixPhotos(prev => ({ ...prev, [id]: src }))
+  }
+
   // Merkitsee havainnon korjatuksi HETI Supabaseen (data ei häviä vaikka
   // sovellus suljettaisiin), mutta EI lähetä ilmoitusta työnjohtajalle vielä
   // — jos asentaja korjaa esim. 40 vikaa peräkkäin, työnjohtaja ei halua 40
   // erillistä ilmoitusta. Sen sijaan korjaukset kertyvät `fixedBatch`-listaan,
   // ja asentaja lähettää yhden koontikuittauksen alapalkin napista kun on
   // valmis (ks. confirmBatch).
+  //
+  // Korjauskuva on pakollinen — nappi on piilotettu/pois käytöstä kunnes
+  // fixPhotos[o.id] on olemassa (ks. käyttöliittymä alempana), joten tämä
+  // funktio ei koskaan kutsu ilman kuvaa, mutta tarkistetaan silti
+  // varmuuden vuoksi ettei vahingossa tallenneta ilman kuvaa.
   async function markFixed(o) {
-    await sb.from('observations').update({ status: 'korjattu', fixed_at: new Date().toISOString() }).eq('id', o.id)
+    const photo = fixPhotos[o.id]
+    if (!photo) return
+    await sb.from('observations').update({
+      status: 'korjattu', fixed_at: new Date().toISOString(), fixed_photo: photo,
+    }).eq('id', o.id)
     setTasks(prev => prev.filter(x => x.id !== o.id))
     setFixedBatch(prev => [...prev, { cat: o.cat, site: o.site, reportBatch: o.report_batch }])
+    setFixPhotos(prev => {
+      const next = { ...prev }
+      delete next[o.id]
+      return next
+    })
   }
 
   async function confirmBatch() {
@@ -293,9 +321,55 @@ export default function InstallerView() {
               )}
 
               <div style={{ padding: 12, paddingTop: 0 }}>
-                <button onClick={() => markFixed(o)} style={{ width: '100%', padding: 12, background: '#1a8a50', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14 }}>
+                {fixPhotos[o.id] ? (
+                  <div style={{ marginBottom: 8 }}>
+                    <img
+                      src={fixPhotos[o.id]}
+                      alt=""
+                      style={{ width: '100%', display: 'block', borderRadius: 8, border: '2px solid #1a8a50' }}
+                    />
+                    <label style={{ display: 'block', textAlign: 'center', marginTop: 6, fontSize: 12, color: '#1a2fcc', fontWeight: 600 }}>
+                      {t('retakeFixPhoto')}
+                      <input
+                        type="file" accept="image/*" capture="environment"
+                        onChange={e => addFixPhoto(o.id, e.target.files[0])}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <label style={{
+                    display: 'block', textAlign: 'center', padding: 12, marginBottom: 8,
+                    border: '1.5px dashed #d0d5e8', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                    color: photoBusy[o.id] ? '#9aa2c0' : '#1a2fcc', cursor: 'pointer',
+                  }}>
+                    {photoBusy[o.id] ? t('compressing') : t('addFixPhoto')}
+                    <input
+                      type="file" accept="image/*" capture="environment"
+                      onChange={e => addFixPhoto(o.id, e.target.files[0])}
+                      style={{ display: 'none' }}
+                      disabled={!!photoBusy[o.id]}
+                    />
+                  </label>
+                )}
+                <button
+                  onClick={() => markFixed(o)}
+                  disabled={!fixPhotos[o.id]}
+                  title={!fixPhotos[o.id] ? t('needPhoto') : undefined}
+                  style={{
+                    width: '100%', padding: 12, color: '#fff', border: 'none', borderRadius: 8,
+                    fontWeight: 700, fontSize: 14,
+                    background: fixPhotos[o.id] ? '#1a8a50' : '#b7c0d8',
+                    cursor: fixPhotos[o.id] ? 'pointer' : 'not-allowed',
+                  }}
+                >
                   {t('markFixed')}
                 </button>
+                {!fixPhotos[o.id] && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: '#9aa2c0', textAlign: 'center' }}>
+                    {t('needPhoto')}
+                  </div>
+                )}
               </div>
             </div>
           )

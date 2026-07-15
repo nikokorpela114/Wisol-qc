@@ -455,3 +455,31 @@ export function renderGroupMapImage(mapData, items) {
 
   return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), outW, outH, rowLabels }
 }
+
+// Downscale + re-encode an image file straight away. Raw phone photos can be
+// several MB — compressing to a reasonable max dimension keeps PDF exports
+// and Supabase storage light. Used by both App.jsx (havainnon omat kuvat)
+// and InstallerView.jsx (korjauskuva).
+export function compressImage(file, maxDim = 1600, quality = 0.75) {
+  return new Promise(resolve => {
+    const reader = new FileReader()
+    reader.onload = e => {
+      const img = new Image()
+      img.onload = () => {
+        let { width, height } = img
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height)
+          width = Math.round(width * scale); height = Math.round(height * scale)
+        }
+        const c = document.createElement('canvas')
+        c.width = width; c.height = height
+        c.getContext('2d').drawImage(img, 0, 0, width, height)
+        resolve(c.toDataURL('image/jpeg', quality))
+      }
+      img.onerror = () => resolve(e.target.result)
+      img.src = e.target.result
+    }
+    reader.onerror = () => resolve(null)
+    reader.readAsDataURL(file)
+  })
+}
