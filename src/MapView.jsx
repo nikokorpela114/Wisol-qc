@@ -268,14 +268,23 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     y: p.y * H * transform.scale + transform.ty
   }))
 
-  // Rivinumeroiden fonttikoko — yksinkertainen, käyttäjän itse
-  // käytännössä toimivaksi vahvistama kaava vanhasta, aiemmin hyvin
-  // toimineesta versiosta. Aiemmat yritykset "parantaa" tätä (g-transform,
-  // HTML-elementit, törmäystarkistukset, sivusiirrot) osoittautuivat
-  // toistuvasti huonommiksi käytännön käytössä kuin tämä yksinkertainen
-  // alkuperäinen — joten luotetaan nyt tositestattuun ratkaisuun teorian
-  // sijaan.
-  const scaledFontSize = Math.max(7, Math.min(14, 10 / transform.scale))
+  // Rivinumerot lasketaan RUUTUPIKSELEINÄ (samaan tapaan kuin gpsDot/pinDot
+  // yllä), EI SVG:n sisäisenä fontSize-arvona. Tämä on toinen kierros
+  // samaan ongelmaan: "yksinkertainen" scaledFontSize = 10/scale -kaava
+  // NÄYTTI toimivan yhdessä tietyssä zoomitilanteessa (referenssikuva),
+  // mutta se on täsmälleen se alkuperäinen bugi josta koko tämä korjaus-
+  // sarja lähti liikkeelle — lähelle zoomatessa (scale iso) paikallinen
+  // arvo menee pieneksi mutta SVG:n oma CSS-skaalaus (scale(transform.scale))
+  // kertoo sen takaisin isoksi, ja numerot paisuvat jättimäisiksi ja
+  // menevät päällekkäin. Kun laatikko lasketaan suoraan lopulliseksi
+  // ruutupikseliksi (kuten pin/GPS-pisteet), koko pysyy AINA samana
+  // riippumatta zoomista — ei voi koskaan mennä liian isoksi eikä liian
+  // pieneksi, riippumatta miten kauas tai lähelle zoomataan.
+  const rowLabelDots = rowNumbers.map(t => ({
+    x: t.x * transform.scale + transform.tx,
+    y: t.y * transform.scale + transform.ty,
+    text: t.text,
+  }))
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
   return (
@@ -367,32 +376,28 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             )
           })}
 
-          {/* Row numbers - white bg for legibility */}
-          {rowNumbers.map((t, i) => (
-            <g key={`t${i}`}>
-              <rect
-                x={t.x - 8}
-                y={t.y - 8}
-                width={16}
-                height={10}
-                fill="white"
-                fillOpacity={0.75}
-                rx={1}
-              />
-              <text
-                x={t.x}
-                y={t.y}
-                fontSize={Math.max(9, scaledFontSize)}
-                fill="#0d1a6e"
-                fontFamily="sans-serif"
-                fontWeight="bold"
-                textAnchor="middle"
-              >
-                {t.text}
-              </text>
-            </g>
-          ))}
         </svg>
+
+        {/* Row number labels — HTML-elementteinä, kiinteä CSS-pikselikoko.
+            EI koskaan SVG:n sisällä, jotta koko pysyy aina samana zoomista
+            riippumatta (ks. rowLabelDots-laskennan selitys yllä). */}
+        {rowLabelDots.map((d, i) => (
+          <div
+            key={`rl${i}`}
+            style={{
+              position: 'absolute', left: d.x, top: d.y,
+              transform: 'translate(-50%,-50%)',
+              background: 'rgba(255,255,255,0.85)',
+              color: '#0d1a6e',
+              fontFamily: 'sans-serif', fontWeight: 700, fontSize: 12,
+              padding: '1px 4px', borderRadius: 3,
+              pointerEvents: 'none', whiteSpace: 'nowrap',
+              lineHeight: 1.3,
+            }}
+          >
+            {d.text}
+          </div>
+        ))}
 
         {/* GPS dot overlay */}
         {gpsDot && (
