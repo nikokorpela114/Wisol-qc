@@ -3,7 +3,17 @@ import React, { useRef, useEffect, useState, useCallback } from 'react'
 const PANEL_W_M = 1.15   // meters per panel (width along X)
 const TABLE_DEPTH_M = 4.29  // meters deep (Y direction, always fixed)
 
-export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, readOnly = false, extraPins = [], onViewChange, focusPins = [] }) {
+// HUOM: käytetään SAMAA tyhjää taulukkoa oletusarvona joka renderöinnillä.
+// Jos oletusarvo olisi kirjoitettu suoraan `focusPins = []` parametrina,
+// JavaScript loisi UUDEN taulukko-olion joka ikinen renderöinti — vaikka
+// sisältö on aina tyhjä, olion REFERENSSI muuttuu, mikä sai alla olevan
+// useEffect-riippuvuuslistan [W, H, focusPins] laukeamaan uudelleen JOKA
+// renderöinnillä. Se puolestaan resetoi näkymän takaisin alkuperäiseksi
+// välittömästi käyttäjän oman panoroinnin/zoomauksen jälkeen, jolloin
+// karttaa ei voinut enää liikuttaa itse ollenkaan.
+const EMPTY_PINS = []
+
+export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, readOnly = false, extraPins = EMPTY_PINS, onViewChange, focusPins = EMPTY_PINS }) {
   const containerRef = useRef(null)
   const [transform, setTransform] = useState({ scale: 1, tx: 0, ty: 0 })
   const stateRef = useRef({ scale: 1, tx: 0, ty: 0 })
