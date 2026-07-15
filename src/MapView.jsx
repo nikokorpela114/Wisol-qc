@@ -281,13 +281,15 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
   const labelGap = 6 * labelK // pieni väli numerolapun ja itse rivin väliin, ettei laatikko peity pöydän päälle
   const labelBoxH = 10 * labelK
   const labelRx = 1 * labelK
-  // Jos rivien väli ruudulla käy niin pieneksi ettei edes yhden lapun
-  // korkeus enää mahdu ilman naapuririvin lapun kanssa päällekkäin
-  // menemistä, piilotetaan numerot kokonaan sen sijaan että ne
-  // sotkeutuisivat toisiinsa — sama vika joka korjattiin kerran aiemmin.
-  const scaleYmForLabels = H / (maxY - minY)
-  const rowSpacingPx = TABLE_DEPTH_M * scaleYmForLabels * transform.scale
-  const showRowLabels = rowSpacingPx > desiredLabelPx * 1.3
+  // HUOM: tässä kokeiltiin aiemmin piilottaa numerot kokonaan jos rivien
+  // väli ruudulla olisi teoriassa liian pieni (laskettuna kiinteästä
+  // TABLE_DEPTH_M-oletuksesta), mutta tämä osoittautui epäluotettavaksi —
+  // eri työmailla todellinen rivinväli vaihtelee (sama syy joka aiemmin
+  // aiheutti "eri kokoinen eri alueilla" -bugin), ja kynnys saattoi laskea
+  // väärin niin että numerot katosivat KOKONAAN, ei vain tiheillä
+  // kohdilla. Numerot näytetään siis nyt aina; uusi sijoittelu rivin
+  // oikealle puolelle (labelGap) jo vähentää päällekkäisyysriskiä
+  // riittävästi ilman tätä hauraaksi osoittautunutta piilotuslogiikkaa.
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
   return (
@@ -384,7 +386,6 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
               keskitetty pisteen päälle), jotta laatikko ei mene
               pöydän päälle vaan istuu selkeästi sen jatkeena. */}
           {rowNumbers.map((t, i) => {
-            if (!showRowLabels) return null
             const bx = t.x + labelGap // laatikon vasen reuna
             return (
               <g key={`t${i}`}>
