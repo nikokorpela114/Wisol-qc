@@ -152,7 +152,7 @@ export function findPinRow(mapData, pin) {
   // PÄÄLLEKKÄISISTÄ/duplikoituneista DXF-lohkoista — se on jo erikseen
   // estetty alla olevalla "gap >= -1" tarkistuksella, joten gapTol voi
   // taas olla reilusti isompi ilman että sama bugi palaa.
-  const gapTol = 25 * sxm
+  const gapTol = 45 * sxm
   const rowY = hit.y - localPitch / 2
 
   // Tarkistaa kulkeeko jokin "raja-viiva" kahden lohkon välistä. Tähän
