@@ -152,7 +152,7 @@ export function findPinRow(mapData, pin) {
   // PÄÄLLEKKÄISISTÄ/duplikoituneista DXF-lohkoista — se on jo erikseen
   // estetty alla olevalla "gap >= -1" tarkistuksella, joten gapTol voi
   // taas olla reilusti isompi ilman että sama bugi palaa.
-  const gapTol = 80 * sxm
+  const gapTol = 45 * sxm
   const rowY = hit.y - localPitch / 2
 
   // Tarkistaa kulkeeko jokin "raja-viiva" kahden lohkon välistä. Tähän
@@ -187,36 +187,33 @@ export function findPinRow(mapData, pin) {
 
   const hitPos = sameY.findIndex(e => e.idx === hitIdx)
 
-  // Kaksi erillistä ketjua samasta lähtökohdasta:
-  // - chain: pysähtyy tien/aluerajan kohdalle, käytetään VAIN korostukseen
-  //   (mitkä laatikot väritetään "tämä rivi" -väriseksi PDF:ssä/kartturissa).
-  // - chainForLabel: JATKAA tien yli (ei crossesBoundary-tarkistusta),
-  //   koska rivinumero on sama tien molemmin puolin — se on merkitty vain
-  //   kerran rivin oikeaan päähän, joka voi olla tien toisella puolella.
-  //   Ilman tätä tien tälle puolelle jäävä pätkä ei koskaan löytänyt omaa
-  //   numeroaan, koska sen oma (väärä, liian lyhyt) targetX osui kauas
-  //   todellisesta numerolapusta.
-  function buildChain(useBoundary) {
-    const c = [sameY[hitPos]]
-    for (let i = hitPos - 1; i >= 0; i--) {
-      const edge = c[0].left
-      const gap = edge - sameY[i].right
-      if (gap >= -1 && gap <= gapTol && (!useBoundary || !crossesBoundary(sameY[i].right, edge))) c.unshift(sameY[i])
-      else break
-    }
-    for (let i = hitPos + 1; i < sameY.length; i++) {
-      const edge = c[c.length - 1].right
-      const gap = sameY[i].left - edge
-      if (gap >= -1 && gap <= gapTol && (!useBoundary || !crossesBoundary(edge, sameY[i].left))) c.push(sameY[i])
-      else break
-    }
-    return c
+  // HUOM: kokeiltiin aiemmin erillistä "ohita tie numeron haussa" -ketjua,
+  // mutta se osoittautui vääräksi — tiet OIKEASTI rajoittavat rivejä
+  // useilla alueilla (havaittu suoraan kartalta: pinni tien toisella
+  // puolella löysi väärän, kaukaisen rivin numeron kun tie-tarkistus
+  // ohitettiin). Käytetään siis yhtä ja samaa tie-/aluerajan huomioivaa
+  // ketjua sekä korostukseen että numeron hakuun — jos jollain TOISELLA
+  // työmaalla rivi oikeasti jatkuu saman numeroisena tien yli, se pitää
+  // ratkaista erikseen (esim. tarkistamalla onko molemmin puolin sama
+  // numero), ei sivuuttamalla tie-tarkistus kokonaan kaikkialla.
+  const chain = [sameY[hitPos]]
+  for (let i = hitPos - 1; i >= 0; i--) {
+    const edge = chain[0].left
+    const gap = edge - sameY[i].right
+    // gap < -1: lohkot ovat selvästi päällekkäin (esim. DXF:n duplikoitu/
+    // limittyvä data) — ei ketjuteta tällaisen läpi.
+    if (gap >= -1 && gap <= gapTol && !crossesBoundary(sameY[i].right, edge)) chain.unshift(sameY[i])
+    else break
   }
-  const chain = buildChain(true)
-  const chainForLabel = buildChain(false)
+  for (let i = hitPos + 1; i < sameY.length; i++) {
+    const edge = chain[chain.length - 1].right
+    const gap = sameY[i].left - edge
+    if (gap >= -1 && gap <= gapTol && !crossesBoundary(edge, sameY[i].left)) chain.push(sameY[i])
+    else break
+  }
 
   // 3. Rivin oma oikea reuna = suurin (ins.x + leveys) vain ketjuun kuuluvista lohkoista
-  const rowRightX = Math.max(...chainForLabel.map(e => e.right))
+  const rowRightX = Math.max(...chain.map(e => e.right))
   const targetX = rowRightX
   const targetY = hit.y - localPitch / 2
 
