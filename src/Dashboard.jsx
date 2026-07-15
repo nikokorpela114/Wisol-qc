@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [newTeamName, setNewTeamName] = useState('')
   const [newInstallerName, setNewInstallerName] = useState('')
   const [newInstallerPin, setNewInstallerPin] = useState('')
+  const [lightboxSrc, setLightboxSrc] = useState(null) // korjauskuvan suurennettu näkymä
 
   const load = useCallback(async () => {
     const [{ data: o, error: oErr }, { data: i, error: iErr }, { data: tm, error: tErr }] = await Promise.all([
@@ -315,14 +316,15 @@ export default function Dashboard() {
                   <th style={thStyle}>Korjaaja</th>
                   <th style={thStyle}>Havaittu</th>
                   <th style={thStyle}>Korjattu</th>
+                  <th style={thStyle}>Kuva</th>
                 </tr>
               </thead>
               <tbody>
                 {fixedSorted.map(o => (
-                  <TableRow key={o.id} o={o} installerById={installerById} fmtTime={fmtTime} selected={selected.has(o.id)} onToggle={() => toggleSelect(o.id)} />
+                  <TableRow key={o.id} o={o} installerById={installerById} fmtTime={fmtTime} selected={selected.has(o.id)} onToggle={() => toggleSelect(o.id)} onOpenPhoto={setLightboxSrc} />
                 ))}
                 {fixedSorted.length === 0 && (
-                  <tr><td colSpan={7} style={{ ...tdStyle, textAlign: 'center', color: '#9aa2c0', padding: 40 }}>Ei vielä korjattuja</td></tr>
+                  <tr><td colSpan={8} style={{ ...tdStyle, textAlign: 'center', color: '#9aa2c0', padding: 40 }}>Ei vielä korjattuja</td></tr>
                 )}
               </tbody>
             </table>
@@ -429,6 +431,29 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {lightboxSrc && (
+        <div
+          onClick={() => setLightboxSrc(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(10,14,30,0.85)', zIndex: 1000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, cursor: 'zoom-out',
+          }}
+        >
+          <img
+            src={lightboxSrc}
+            alt="Korjauskuva"
+            style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 10, boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}
+          />
+          <button
+            onClick={() => setLightboxSrc(null)}
+            style={{
+              position: 'absolute', top: 20, right: 20, width: 40, height: 40, borderRadius: '50%',
+              background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer',
+            }}
+          >✕</button>
+        </div>
+      )}
     </div>
   )
 }
@@ -498,7 +523,7 @@ function ObsRow({ o, fmtTime, selected, onToggle }) {
   )
 }
 
-function TableRow({ o, installerById, fmtTime, selected, onToggle }) {
+function TableRow({ o, installerById, fmtTime, selected, onToggle, onOpenPhoto }) {
   return (
     <tr style={{ borderBottom: '1px solid #f0f1f7', background: selected ? '#f3f5ff' : 'transparent' }}>
       <td style={tdStyle}><input type="checkbox" checked={selected} onChange={onToggle} /></td>
@@ -508,6 +533,18 @@ function TableRow({ o, installerById, fmtTime, selected, onToggle }) {
       <td style={tdStyle}>{installerById.get(o.assigned_installer_id)?.name || '—'}</td>
       <td style={tdStyle}>{fmtTime(o.created_at)}</td>
       <td style={tdStyle}>{fmtTime(o.fixed_at)}</td>
+      <td style={tdStyle}>
+        {o.fixed_photo ? (
+          <img
+            src={o.fixed_photo}
+            alt="Korjauskuva"
+            onClick={() => onOpenPhoto(o.fixed_photo)}
+            style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, border: '1px solid #d0d5e8', cursor: 'pointer' }}
+          />
+        ) : (
+          <span style={{ color: '#c3c8dc', fontSize: 12 }}>—</span>
+        )}
+      </td>
     </tr>
   )
 }
