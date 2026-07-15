@@ -367,11 +367,14 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             )
           })}
 
-          {/* Row numbers - white bg for legibility */}
+          {/* Row numbers - white bg for legibility. Laatikko alkaa DXF:n
+              tekstipisteestä ja ulottuu oikealle (ei enää keskitetty
+              pisteen päälle), jotta se ei mene pöydän päälle vaan
+              näyttää selkeästi rivin jatkeelta. */}
           {rowNumbers.map((t, i) => (
             <g key={`t${i}`}>
               <rect
-                x={t.x - 8}
+                x={t.x + 2}
                 y={t.y - 8}
                 width={16}
                 height={10}
@@ -380,7 +383,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
                 rx={1}
               />
               <text
-                x={t.x}
+                x={t.x + 10}
                 y={t.y}
                 fontSize={Math.max(9, scaledFontSize)}
                 fill="#0d1a6e"
