@@ -285,6 +285,22 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     y: t.y * transform.scale + transform.ty,
     text: t.text,
   }))
+  // Päällekkäisyyssuoja — kun kaukaa zoomatessa satoja kiinteän kokoisia
+  // lappuja ajautuu lähelle toisiaan, ne muuttuvat luettavan numeron
+  // sijaan tiheäksi "kohinakuvioksi". Koska sijainnit ovat jo tässä
+  // vaiheessa LOPULLISIA ruutupikseleitä, päällekkäisyys voidaan
+  // tarkistaa suoraan ja luotettavasti: piilotetaan vain ne yksittäiset
+  // laput jotka oikeasti osuisivat kiinni jo näytettäväksi valittuun
+  // naapuriinsa — rivit joilla on tilaa näkyvät aina normaalisti.
+  const visibleRowLabelDots = (() => {
+    const sorted = [...rowLabelDots].sort((a, b) => (a.y - b.y) || (a.x - b.x))
+    const kept = []
+    for (const d of sorted) {
+      const overlaps = kept.some(k => Math.abs(d.x - k.x) < 26 && Math.abs(d.y - k.y) < 16)
+      if (!overlaps) kept.push(d)
+    }
+    return kept
+  })()
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
   return (
@@ -381,7 +397,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
         {/* Row number labels — HTML-elementteinä, kiinteä CSS-pikselikoko.
             EI koskaan SVG:n sisällä, jotta koko pysyy aina samana zoomista
             riippumatta (ks. rowLabelDots-laskennan selitys yllä). */}
-        {rowLabelDots.map((d, i) => (
+        {visibleRowLabelDots.map((d, i) => (
           <div
             key={`rl${i}`}
             style={{
