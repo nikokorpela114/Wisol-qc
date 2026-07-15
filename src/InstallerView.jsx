@@ -5,6 +5,7 @@ import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
 import { KNOWN_SITES, findPinRow, renderPinMapThumb, CAT_EN, SEV_EN, compressImage } from './shared.js'
 import { subscribeToPush, sendPushNotification } from './push.js'
+import MapView from './MapView.jsx'
 
 const SESSION_KEY = 'wisol_installer_session'
 const FIXED_BATCH_KEY_PREFIX = 'wisol_installer_fixed_batch_' // + installer id
@@ -28,6 +29,8 @@ export default function InstallerView() {
   const [confirmMsg, setConfirmMsg] = useState('')
   const [fixPhotos, setFixPhotos] = useState({}) // { [observation.id]: dataUrl } — pakollinen korjauskuva ennen "Merkitse korjatuksi"
   const [photoBusy, setPhotoBusy] = useState({}) // { [id]: true } kun kuvaa vielä pakataan
+  const taskRefs = useRef({}) // { [observation.id]: HTMLElement } — yleiskartan napautus vierittää oikeaan korttiin
+  const [highlightId, setHighlightId] = useState(null) // hetkellinen korostus kartalta navigoitaessa
 
   const t = key => {
     const dict = {
@@ -50,6 +53,7 @@ export default function InstallerView() {
       retakeFixPhoto: { fi: '📷 Ota uusi kuva', en: '📷 Retake photo' },
       needPhoto: { fi: 'Ota kuva korjauksesta ennen kuin voit merkitä sen korjatuksi', en: 'Take a photo of the fix before marking it done' },
       compressing: { fi: 'Käsitellään kuvaa…', en: 'Processing photo…' },
+      overviewTitle: { fi: '📍 Kaikki avoimet viat kartalla', en: '📍 All open faults on map' },
     }
     return dict[key]?.[lang] ?? key
   }
@@ -142,6 +146,35 @@ export default function InstallerView() {
     })
     return map
   }, [mapData, tasks])
+
+  // Kaikkien avointen tehtävien pinnit yhtä, elävää yleiskarttaa varten
+  // listan yläreunassa — kevyt lisä thumbById:n rinnalle, ei korvaa sitä.
+  // MapView'lle annetaan nämä extraPins-propsina (samat oranssit pisteet
+  // joita työnjohtajan pikalisäyskin käyttää), ja pin=null koska mikään
+  // yksittäinen tehtävä ei ole tässä "valittuna".
+  const overviewTasks = useMemo(
+    () => (tasks || []).filter(o => o.pin_x != null),
+    [tasks]
+  )
+  const overviewPins = useMemo(
+    () => overviewTasks.map(o => ({ x: o.pin_x, y: o.pin_y })),
+    [overviewTasks]
+  )
+
+  // Yleiskartan napautus vierittää lähimpään tehtävään sen sijaan että
+  // asettaisi uuden pinnin (tässä näkymässä ei koskaan luoda uusia
+  // havaintoja — MapView'n onPin-kutsu vain uudelleenkäytetään navigointiin).
+  function scrollToNearestTask(coords) {
+    let best = Infinity, bestId = null
+    overviewTasks.forEach(o => {
+      const d = Math.hypot(o.pin_x - coords.x, o.pin_y - coords.y)
+      if (d < best) { best = d; bestId = o.id }
+    })
+    if (bestId == null) return
+    taskRefs.current[bestId]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setHighlightId(bestId)
+    setTimeout(() => setHighlightId(id => (id === bestId ? null : id)), 1800)
+  }
 
   // Figure out which site's map to show — first distinct site among open tasks
   useEffect(() => {
@@ -285,6 +318,23 @@ export default function InstallerView() {
           {pushMsg || t('notifOn')}
         </button>
 
+        {mapData && overviewPins.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#6670a0', marginBottom: 6 }}>
+              {t('overviewTitle')}
+            </div>
+            <MapView
+              mapData={mapData}
+              pin={null}
+              onPin={scrollToNearestTask}
+              gpsCoords={gpsCoords}
+              extraPins={overviewPins}
+              readOnly
+              height={200}
+            />
+          </div>
+        )}
+
         {tasks === null && <div style={{ textAlign: 'center', color: '#6670a0', padding: 40 }}>{t('loading')}</div>}
         {tasks && tasks.length === 0 && <div style={{ textAlign: 'center', color: '#6670a0', padding: 40 }}>{t('noTasks')}</div>}
 
@@ -293,7 +343,16 @@ export default function InstallerView() {
           const sevLabel = lang === 'en' ? (SEV_EN[o.sev] || o.sev) : o.sev
           const rowInfo = mapData && o.pin_x != null ? findPinRow(mapData, { x: o.pin_x, y: o.pin_y }) : null
           return (
-            <div key={o.id} style={{ background: '#fff', borderRadius: 12, border: '1px solid #d0d5e8', marginBottom: 12, overflow: 'hidden' }}>
+            <div
+              key={o.id}
+              ref={el => { taskRefs.current[o.id] = el }}
+              style={{
+                background: '#fff', borderRadius: 12, marginBottom: 12, overflow: 'hidden',
+                border: highlightId === o.id ? '2px solid #1a2fcc' : '1px solid #d0d5e8',
+                boxShadow: highlightId === o.id ? '0 0 0 4px rgba(26,47,204,0.15)' : 'none',
+                transition: 'box-shadow 0.3s, border-color 0.3s',
+              }}
+            >
               <div style={{ padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eef0f7' }}>
                 <span style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e' }}>{catLabel}</span>
                 <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: sevBg[o.sev], color: sevColor[o.sev] }}>{sevLabel}</span>
