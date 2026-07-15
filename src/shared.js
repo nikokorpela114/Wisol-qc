@@ -143,16 +143,21 @@ export function findPinRow(mapData, pin) {
   // eri fyysiset rivit samaksi ketjuksi. Toleranssi on siksi tiukka — vain
   // saman rivin omien lohkojen pieni mittausvaihtelu, ei naapuririvin väli.
   const yTol = th * 0.25
-  // HUOM: 6 m osoittautui liian tiukaksi — havaittiin oikea, laillinen
-  // 48 yksikön huoltokäytävä saman rivin kahden pöytäryhmän välissä, jota
-  // ei enää ketjutettu yhteen, jolloin vasen pätkä ei löytänyt rivin
-  // OMAA numerolappua (se on vain rivin oikeassa päässä) ja haku napsahti
-  // väärään, lähimpään sattumanvaraiseen numeroon. Aiempi "455 yksikön
-  // jättiketju" -bugi ei itse asiassa johtunut suuresta gapTol:sta vaan
-  // PÄÄLLEKKÄISISTÄ/duplikoituneista DXF-lohkoista — se on jo erikseen
-  // estetty alla olevalla "gap >= -1" tarkistuksella, joten gapTol voi
-  // taas olla reilusti isompi ilman että sama bugi palaa.
-  const gapTol = 45 * sxm
+  // HUOM: tätä nostettiin kerran 6:sta 45:een yhden erikoistapauksen takia
+  // (laillinen ~48 yksikön huoltokäytävä saman rivin sisällä, joka ei
+  // ketjuttunut yhteen 6:lla). Se osoittautui kenttätestissä pahemmaksi
+  // regressioksi kuin ongelma jota se yritti korjata: 45 on isompi kuin se
+  // JO KERRAN todistetusti rikkinäinen 25 yksikön arvo, joten se ketjutti
+  // taas eri rivejä yhteen väärillä rivinumeroilla JA venytti
+  // renderGroupMapImage:n rajausta kattamaan aivan liian ison alueen
+  // (havaittu: sekava/liian kaukaa otettu yhteiskarttakuva). Palautettu
+  // takaisin 6:een. "gap >= -1" -tarkistus estää vain PÄÄLLEKKÄISTEN
+  // lohkojen ketjuttamisen, ei sitä että kaksi ERI mutta samalla
+  // korkeudella olevaa riviä ketjuutuu ilman piirrettyä tie-/aluerajaa
+  // niiden välissä — se yksittäinen huoltokäytävätapaus pitää ratkaista
+  // tarkemmalla logiikalla (esim. tarkistamalla että molemmin puolin
+  // löytyy sama rivinumero) myöhemmin, ei laajentamalla tätä globaalisti.
+  const gapTol = 6 * sxm
   const rowY = hit.y - localPitch / 2
 
   // Tarkistaa kulkeeko jokin "raja-viiva" kahden lohkon välistä. Tähän
@@ -454,4 +459,32 @@ export function renderGroupMapImage(mapData, items) {
   })
 
   return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), outW, outH, rowLabels }
+}
+
+// Downscale + re-encode an image file straight away. Raw phone photos can be
+// several MB — compressing to a reasonable max dimension keeps PDF exports
+// and Supabase storage light. Used by both App.jsx (havainnon omat kuvat)
+// and InstallerView.jsx (korjauskuva).
+export function compressImage(file, maxDim = 1600, quality = 0.75) {
+  return new Promise(resolve => {
+    const reader = new FileReader()
+    reader.onload = e => {
+      const img = new Image()
+      img.onload = () => {
+        let { width, height } = img
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height)
+          width = Math.round(width * scale); height = Math.round(height * scale)
+        }
+        const c = document.createElement('canvas')
+        c.width = width; c.height = height
+        c.getContext('2d').drawImage(img, 0, 0, width, height)
+        resolve(c.toDataURL('image/jpeg', quality))
+      }
+      img.onerror = () => resolve(e.target.result)
+      img.src = e.target.result
+    }
+    reader.onerror = () => resolve(null)
+    reader.readAsDataURL(file)
+  })
 }
