@@ -329,7 +329,6 @@ export default function InstallerView() {
               onPin={scrollToNearestTask}
               gpsCoords={gpsCoords}
               extraPins={overviewPins}
-              focusPins={overviewPins}
               readOnly
               height={200}
             />
