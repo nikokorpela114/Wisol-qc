@@ -35,15 +35,6 @@ export const CAT_EN = {
 }
 export const SEV_EN = { Kriittinen: 'Critical', Huomio: 'Attention', Info: 'Info' }
 
-// HUOM: dxfParser.js tallentaa jokaiselle INSERT:lle ins.rot-kentän
-// block-nimen "@30DEG"-osasta (esim. "2P22@30DEG..."). Tämä EI ole
-// pöydän kierto pohjapiirroksen X/Y-tasossa — se on paneelin
-// asennus-/kallistuskulma (tuttu esim. "30 asteen kallistus" aurinko-
-// paneeliasennuksista), joka ei vaikuta pöydän sijaintiin tai muotoon
-// ylhäältä katsottuna. Tätä kokeiltiin virheellisesti tulkita tasokiertona
-// kerran, mikä siirsi/limitti kaikki 1051 pöytää väärin — ins.rot:ia ei
-// siis käytetä missään piirrossa tai osumatunnistuksessa.
-
 export const PDF_STR = {
   fi: {
     title: 'Laadunvalvontaraportti', site: 'Työmaa', inspector: 'Tarkastaja', rivi: 'Rivi / alue',
@@ -76,32 +67,12 @@ export function findPinRow(mapData, pin) {
   const psx = pin.x * mapData.W, psy = pin.y * mapData.H
   const th = TABLE_DEPTH_M * sym
 
-  // 1. Etsi insert-lohko johon pinni osuu. (HUOM: ins.rot ei ole pöydän
-  //    pohjapiirroskierto vaan paneelin kallistuskulma — ei käytetä tässä.)
+  // 1. Etsi insert-lohko johon pinni osuu
   let hitIdx = -1
   mapData.inserts.forEach((ins, idx) => {
     const tw = ins.panels * PANEL_W_M * sxm
     if (psx >= ins.x - 3 && psx <= ins.x + tw + 3 && psy >= ins.y - th - 3 && psy <= ins.y + 3) hitIdx = idx
   })
-  // Fallback: joillain työmailla rivit on aseteltu hyvin tiheään (ks.
-  // kommentti alempana "rivit 61/63/65 lähes päällekkäin"), jolloin
-  // napautus voi osua muutaman pikselin päähän kahden pöydän välisestä
-  // rajasta eikä täsmällinen ±3 yksikön tarkistus löydä mitään —
-  // "Havaittu rivi" katosi tällöin kokonaan sen sijaan että olisi näyttänyt
-  // lähimmän, todennäköisesti oikean rivin. Jos tarkkaa osumaa ei löydy,
-  // valitaan lähin pöytä (X-suunnassa napautuksen kohdalla oleva, Y-etäisyys
-  // pienin) kohtuullisen etäisyyden sisältä sen sijaan että luovutetaan.
-  if (hitIdx < 0) {
-    let bestDist = Infinity
-    mapData.inserts.forEach((ins, idx) => {
-      const tw = ins.panels * PANEL_W_M * sxm
-      if (psx < ins.x - 3 || psx > ins.x + tw + 3) return // X-suunnassa oltava edes lähellä pöytää
-      const center = ins.y - th / 2
-      const d = Math.abs(psy - center)
-      if (d < bestDist) { bestDist = d; hitIdx = idx }
-    })
-    if (bestDist > th * 1.2) hitIdx = -1 // liian kaukana ollakseen luotettava arvaus
-  }
   if (hitIdx < 0) return null
   const hit = mapData.inserts[hitIdx]
 
@@ -176,58 +147,19 @@ export function findPinRow(mapData, pin) {
 
   // 4. Etsi lähin numerolappu VAIN saman Y-kaistan sisältä, ja hylkää jos
   //    lähinkin on epäuskottavan kaukana (esim. toiselta puolelta karttaa).
-  //
-  //    HUOM (löydetty DXF-datasta suoraan): joillain työmaan alueilla
-  //    paneelipöydät on kierretty (esim. block-nimessä "@30DEG"), jolloin
-  //    niiden todellinen Y-suuntainen rivi-väli EI vastaa kiinteää
-  //    TABLE_DEPTH_M (4.29 m) -oletusta — mitattu esimerkki: todellinen
-  //    väli oli ~10.0 yksikköä, yli 2× suurempi kuin th. Kiinteä
-  //    th-pohjainen toleranssi oli tällöin liian tiukka ja "Havaittu rivi"
-  //    katosi kokonaan tällaisilla kierretyillä alueilla. Sen sijaan että
-  //    luotettaisiin kiinteään th:hon, mitataan TODELLINEN rivi-väli
-  //    dynaamisesti lähialueen numerolapuista (erotus kahden lähimmän
-  //    ERI-Y:n lapun välillä samalla X-kaistalla) ja käytetään sitä
-  //    toleranssin pohjana — tämä mukautuu automaattisesti sekä normaaleihin
-  //    että kierrettyihin alueisiin ilman että pöytien piirtoa (joka
-  //    edelleen jättää kierron huomiotta) tarvitsee korjata erikseen.
-  const nearbyLabelsX = mapData.rowNumbers.filter(t => Math.abs(t.x - targetX) < th * 6)
-  const distinctYs = [...new Set(nearbyLabelsX.map(t => Math.round(t.y * 100) / 100))].sort((a, b) => b - a)
-  let localPitch = th // fallback jos alle 2 lappua löytyy lähialueelta
-  if (distinctYs.length >= 2) {
-    const gaps = []
-    for (let i = 0; i < distinctYs.length - 1; i++) gaps.push(distinctYs[i] - distinctYs[i + 1])
-    gaps.sort((a, b) => a - b)
-    localPitch = gaps[Math.floor(gaps.length / 2)] // mediaani kestää yksittäiset poikkeamat paremmin kuin min/ka
-  }
-  const labelYTol = Math.max(th * 0.6, localPitch * 0.45)
-  const maxLabelDist = Math.max(th * 4, localPitch * 3)
+  //    Numerolapun oma Y-toleranssi on tarkoituksella löysempi kuin rivin
+  //    ketjutuksen yTol yllä — labelin tekstianckeri ei aina osu tasan
+  //    pöydän keskikohtaan, mutta silti on selvästi lähempänä omaa riviään
+  //    kuin naapuririviä.
+  const labelYTol = th * 0.6
+  const maxLabelDist = th * 4 // n. rivin syvyyden nelinkertainen etäisyys riittää kattamaan reunan epätarkkuudet
   let best = Infinity, label = null
   mapData.rowNumbers.forEach(t => {
     if (Math.abs(t.y - targetY) > labelYTol) return // eri Y-kaista → ei voi olla saman rivin numero
     const d = Math.hypot(t.x - targetX, t.y - targetY)
     if (d < best) { best = d; label = t.text }
   })
-  // Fallback: jos tiukka Y-kaista ei löydä yhtään lappua (esim. label on
-  // hieman odotettua kauempana Y-suunnassa jollain työmaalla), etsitään
-  // lähin lappu ILMAN Y-kaistarajoitusta mutta silti maxLabelDist-säteen
-  // sisältä — parempi näyttää lähin uskottava numero kuin ei mitään.
-  if (!label || best > maxLabelDist) {
-    let best2 = Infinity, label2 = null
-    mapData.rowNumbers.forEach(t => {
-      const d = Math.hypot(t.x - targetX, t.y - targetY)
-      if (d < best2) { best2 = d; label2 = t.text }
-    })
-    const nearest5 = mapData.rowNumbers
-      .map(t => ({ text: t.text, x: t.x, y: t.y, d: Math.hypot(t.x - targetX, t.y - targetY), dy: t.y - targetY }))
-      .sort((a, b) => a.d - b.d)
-      .slice(0, 6)
-    console.log('[findPinRow debug] targetX=' + targetX.toFixed(1) + ' targetY=' + targetY.toFixed(1) + ' labelYTol=' + labelYTol.toFixed(1) + ' maxLabelDist=' + maxLabelDist.toFixed(1))
-    console.log('[findPinRow debug] strictBest=' + best + ' strictLabel=' + label + ' fallbackBest=' + best2.toFixed(1) + ' fallbackLabel=' + label2)
-    console.log('[findPinRow debug] lähimmät 6 numerolappua (text, x, y, etäisyys d, Y-ero dy):')
-    nearest5.forEach(n => console.log('  ' + n.text + '  x=' + n.x.toFixed(1) + ' y=' + n.y.toFixed(1) + ' d=' + n.d.toFixed(1) + ' dy=' + n.dy.toFixed(1)))
-    if (label2 && best2 <= maxLabelDist * 1.5) { best = best2; label = label2 }
-  }
-  if (!label || best > maxLabelDist * 1.5) return null
+  if (!label || best > maxLabelDist) return null
 
   // Palautetaan myös koko rivin (ketjun) lohkojen indeksit — näitä tarvitaan
   // kun halutaan korostaa/rajata koko rivi eikä vain sitä yhtä lohkoa johon
@@ -366,17 +298,10 @@ export function renderGroupMapImage(mapData, items) {
     if (ins.y > maxY) maxY = ins.y
   })
 
-  // Aiemmin marginaali oli hyvin pieni (5 % / kiinteä 6 yksikköä), jolloin
-  // rajaus näytti VAIN itse pisteiden rivin ilman mitään ympäröivää
-  // kontekstia — asentajan oli mahdotonta hahmottaa mihin kohtaan koko
-  // riviä tai työmaata tämä pätkä sijoittuu, koska yhtään naapuririvin
-  // numerolappua ei näkynyt vertailukohdaksi. Pystysuunnassa marginaali on
-  // nyt sidottu pöydän syvyyteen (th) niin että ainakin osa rivin ylä- ja
-  // alapuolisesta naapuririvistä (numerolappuineen) jää aina näkyviin,
-  // vaakasuunnassa marginaali on reilusti suurempi jotta rivin päät/jatko
-  // hahmottuvat paremmin.
-  const padX = Math.max(40 * sxm, (maxX - minX) * 0.15)
-  const padY = Math.max(th * 1.8, (maxY - minY) * 0.35)
+  // Small, mostly fixed margin now — the crop width is already driven by
+  // the row's real extent, not by guesswork padding.
+  const padX = Math.max(6 * sxm, (maxX - minX) * 0.05)
+  const padY = Math.max(9 * sym, (maxY - minY) * 0.2)
   const svgX0 = Math.max(0, minX - padX)
   const svgY0 = Math.max(0, minY - padY)
   const svgX1 = Math.min(mapData.W, maxX + padX)

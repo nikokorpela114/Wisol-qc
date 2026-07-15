@@ -667,7 +667,7 @@ export default function App() {
             mctx.fillStyle = isPinRow ? 'rgba(214,48,48,0.35)' : 'rgba(26,47,204,0.22)'
             mctx.strokeStyle = isPinRow ? '#d63030' : '#1a2fcc'
             mctx.lineWidth = isPinRow ? 2 : 0.7
-            // ins.y = pöydän alareuna (sama konventio kuin MapView.jsx:ssä)
+            // ins.y = pöydän alareuna (sama konventio kuin MapView.jsx:ssä) — ks. selitys renderGroupMapImagessa
             mctx.fillRect(px(ins.x), py(ins.y) - th, tw, th)
             mctx.strokeRect(px(ins.x), py(ins.y) - th, tw, th)
           })
