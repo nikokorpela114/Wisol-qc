@@ -6,7 +6,7 @@ import { sb } from './supabaseClient.js'
 import InstallerView from './InstallerView.jsx'
 import Dashboard from './Dashboard.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
-import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage } from './shared.js'
+import { KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage } from './shared.js'
 
 const CATS = [
   'Paneeli rikkoutunut', 'Paneeli väärinpäin, yläreuna', 'Paneeli väärinpäin, alareuna',
@@ -45,7 +45,7 @@ export default function App() {
   const [pdfBlob, setPdfBlob] = useState(null)
   const [pdfName, setPdfName] = useState('')
   const [pdfDownloaded, setPdfDownloaded] = useState(false)
-  const [groupByCategory, setGroupByCategory] = useState(true) // oletuksena päällä: samat vikatyypit yhdistetään aina samaan karttakuvaan PDF:ssä
+  const [groupByCategory, setGroupByCategory] = useState(false)
   const [isOnline, setIsOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine)
   const [installers, setInstallers] = useState([])
   const [teams, setTeams] = useState([])
@@ -350,7 +350,7 @@ export default function App() {
       const clone = {
         id, cat: o.cat, sev: o.sev, note: '', muu: o.muu, photos: [],
         pin, db_id: null, createdAt: new Date().toISOString(),
-        clonedFrom: o.id, // pikalisäyksen aikana luotu — käytetään extraPins-listaan MapView'ssa
+        clonedFrom: o.id,
       }
       setObs(prev => [...prev, clone])
       saveObs(clone, site, inspector, rivi)
@@ -667,9 +667,8 @@ export default function App() {
             mctx.fillStyle = isPinRow ? 'rgba(214,48,48,0.35)' : 'rgba(26,47,204,0.22)'
             mctx.strokeStyle = isPinRow ? '#d63030' : '#1a2fcc'
             mctx.lineWidth = isPinRow ? 2 : 0.7
-            // ins.y = pöydän alareuna (sama konventio kuin MapView.jsx:ssä)
-            mctx.fillRect(px(ins.x), py(ins.y) - th, tw, th)
-            mctx.strokeRect(px(ins.x), py(ins.y) - th, tw, th)
+            mctx.fillRect(px(ins.x), py(ins.y), tw, th)
+            mctx.strokeRect(px(ins.x), py(ins.y), tw, th)
           })
 
           mctx.textAlign = 'center'

@@ -3,7 +3,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react'
 const PANEL_W_M = 1.15   // meters per panel (width along X)
 const TABLE_DEPTH_M = 4.29  // meters deep (Y direction, always fixed)
 
-export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, readOnly = false, extraPins = [], onViewChange }) {
+export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, readOnly = false, extraPins = [] }) {
   const containerRef = useRef(null)
   const [transform, setTransform] = useState({ scale: 1, tx: 0, ty: 0 })
   const stateRef = useRef({ scale: 1, tx: 0, ty: 0 })
@@ -20,19 +20,12 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     const ty = (ch - H * scale) / 2
     stateRef.current = { scale, tx, ty }
     setTransform({ scale, tx, ty })
-    // PDF:n yksittäiskartturi (App.jsx) lukee o.mapView.containerW/H, joten
-    // välitetään myös kontin mitat, ei pelkkää scale/tx/ty:tä.
-    if (onViewChange) onViewChange({ scale, tx, ty, containerW: cw, containerH: ch })
   }, [W, H])
 
   const applyTransform = useCallback((s) => {
     stateRef.current = s
     setTransform({ ...s })
-    if (onViewChange) {
-      const el = containerRef.current
-      onViewChange({ ...s, containerW: el?.clientWidth, containerH: el?.clientHeight })
-    }
-  }, [onViewChange])
+  }, [])
 
   const clamp = useCallback((s) => {
     const el = containerRef.current
@@ -280,11 +273,6 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             const scaleYm = H / (maxY - minY)
             const tw = ins.panels * PANEL_W_M * scaleXm
             const th = TABLE_DEPTH_M * scaleYm
-            // HUOM: block-nimen "@30DEG" on paneelin ASENNUS-/KALLISTUSKULMA
-            // (kuinka jyrkässä kulmassa paneeli on aurinkoon nähden), EI
-            // pöydän kiertoa pohjapiirroksen X/Y-tasossa. Tämä tulkittiin
-            // aiemmin virheellisesti tasokierroksi, mikä siirsi/limitti
-            // pöytiä väärin — siksi ins.rot:ia EI käytetä piirrossa.
             return (
               <rect
                 key={`ins${i}`}
