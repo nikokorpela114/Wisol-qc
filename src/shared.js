@@ -105,6 +105,26 @@ export function findPinRow(mapData, pin) {
   if (hitIdx < 0) return null
   const hit = mapData.inserts[hitIdx]
 
+  // 1b. Mitataan TODELLINEN rivi-väli tällä alueella heti, hit.x:n
+  //     ympäriltä — käytetään sitä JOHDONMUKAISESTI kaikkialla (rowY,
+  //     targetY, labelYTol) kiinteän th:n (TABLE_DEPTH_M-oletus) sijaan.
+  //     Aiemmin th:tä käytettiin rowY/targetY:hen mutta localPitch:iä vain
+  //     labelYTol:iin — tämä epäjohdonmukaisuus sai targetY:n osumaan
+  //     väärään kohtaan aina kun todellinen väli poikkesi th:sta, mikä
+  //     työnsi oikean numerolapun tiukan labelYTol-kaistan ulkopuolelle ja
+  //     haku napsahti sen sijaan johonkin kauempana olevaan, väärään
+  //     numeroon — juuri tämä aiheutti tulosten "hyppimisen" pienestäkin
+  //     napautuskohdan muutoksesta.
+  const pitchWindow = mapData.rowNumbers.filter(t => Math.abs(t.x - hit.x) < th * 8)
+  const pitchYs = [...new Set(pitchWindow.map(t => Math.round(t.y * 100) / 100))].sort((a, b) => b - a)
+  let localPitch = th
+  if (pitchYs.length >= 2) {
+    const gaps = []
+    for (let i = 0; i < pitchYs.length - 1; i++) gaps.push(pitchYs[i] - pitchYs[i + 1])
+    gaps.sort((a, b) => a - b)
+    localPitch = gaps[Math.floor(gaps.length / 2)] // mediaani
+  }
+
   // 2. Kerää looginen rivi = lohkot samalla Y-korkeudella JA X-suunnassa
   //    peräkkäin. Pelkkä Y-korkeus ei riitä: jos rivi katkeaa esim. tien
   //    (Road 03/04) kohdalla, tien toisella puolella oleva lohko voi sattua
@@ -130,7 +150,7 @@ export function findPinRow(mapData, pin) {
   // ketjun ja täysin eri "Havaittu rivi" -tuloksen). Pienennetty selvästi
   // realistisemmaksi huoltokäytävän levyiseksi väliksi.
   const gapTol = 6 * sxm
-  const rowY = hit.y - th / 2
+  const rowY = hit.y - localPitch / 2
 
   // Tarkistaa kulkeeko jokin "raja-viiva" kahden lohkon välistä. Tähän
   // lasketaan sekä tiet (mapData.roads) että aluerajat — dxfParser.js lukee
@@ -183,33 +203,14 @@ export function findPinRow(mapData, pin) {
   // 3. Rivin oma oikea reuna = suurin (ins.x + leveys) vain ketjuun kuuluvista lohkoista
   const rowRightX = Math.max(...chain.map(e => e.right))
   const targetX = rowRightX
-  const targetY = hit.y - th / 2
+  const targetY = hit.y - localPitch / 2
 
   // 4. Etsi lähin numerolappu VAIN saman Y-kaistan sisältä, ja hylkää jos
   //    lähinkin on epäuskottavan kaukana (esim. toiselta puolelta karttaa).
-  //
-  //    HUOM (löydetty DXF-datasta suoraan): joillain työmaan alueilla
-  //    paneelipöydät on kierretty (esim. block-nimessä "@30DEG"), jolloin
-  //    niiden todellinen Y-suuntainen rivi-väli EI vastaa kiinteää
-  //    TABLE_DEPTH_M (4.29 m) -oletusta — mitattu esimerkki: todellinen
-  //    väli oli ~10.0 yksikköä, yli 2× suurempi kuin th. Kiinteä
-  //    th-pohjainen toleranssi oli tällöin liian tiukka ja "Havaittu rivi"
-  //    katosi kokonaan tällaisilla kierretyillä alueilla. Sen sijaan että
-  //    luotettaisiin kiinteään th:hon, mitataan TODELLINEN rivi-väli
-  //    dynaamisesti lähialueen numerolapuista (erotus kahden lähimmän
-  //    ERI-Y:n lapun välillä samalla X-kaistalla) ja käytetään sitä
-  //    toleranssin pohjana — tämä mukautuu automaattisesti sekä normaaleihin
-  //    että kierrettyihin alueisiin ilman että pöytien piirtoa (joka
-  //    edelleen jättää kierron huomiotta) tarvitsee korjata erikseen.
-  const nearbyLabelsX = mapData.rowNumbers.filter(t => Math.abs(t.x - targetX) < th * 6)
-  const distinctYs = [...new Set(nearbyLabelsX.map(t => Math.round(t.y * 100) / 100))].sort((a, b) => b - a)
-  let localPitch = th // fallback jos alle 2 lappua löytyy lähialueelta
-  if (distinctYs.length >= 2) {
-    const gaps = []
-    for (let i = 0; i < distinctYs.length - 1; i++) gaps.push(distinctYs[i] - distinctYs[i + 1])
-    gaps.sort((a, b) => a - b)
-    localPitch = gaps[Math.floor(gaps.length / 2)] // mediaani kestää yksittäiset poikkeamat paremmin kuin min/ka
-  }
+  //    localPitch (mitattu vaiheessa 1b) käytetään sekä targetY:n keskitykseen
+  //    että toleranssin pohjana — molemmat käyttävät nyt SAMAA mitattua
+  //    riviväliä, ei kiinteää TABLE_DEPTH_M-oletusta, jotta ne eivät voi
+  //    ajautua ristiriitaan keskenään.
   const labelYTol = Math.max(th * 0.6, localPitch * 0.45)
   const maxLabelDist = Math.max(th * 4, localPitch * 3)
   let best = Infinity, label = null
@@ -218,13 +219,7 @@ export function findPinRow(mapData, pin) {
     const d = Math.hypot(t.x - targetX, t.y - targetY)
     if (d < best) { best = d; label = t.text }
   })
-  // TILAPÄINEN DEBUG
-  console.log('[findPinRow] pin=(' + psx.toFixed(1) + ',' + psy.toFixed(1) + ') hitIdx=' + hitIdx +
-    ' hit=(' + hit.x.toFixed(1) + ',' + hit.y.toFixed(1) + ') chainLen=' + chain.length +
-    ' chainX=[' + chain.map(e => e.left.toFixed(0) + '-' + e.right.toFixed(0)).join(',') + ']' +
-    ' targetX=' + targetX.toFixed(1) + ' targetY=' + targetY.toFixed(1) +
-    ' localPitch=' + localPitch.toFixed(2) + ' labelYTol=' + labelYTol.toFixed(2) +
-    ' -> label=' + label + ' dist=' + best.toFixed(2))
+  const strictLabel = label, strictBest = best
   // Fallback: jos tiukka Y-kaista ei löydä yhtään lappua (esim. label on
   // hieman odotettua kauempana Y-suunnassa jollain työmaalla), etsitään
   // lähin lappu ILMAN Y-kaistarajoitusta mutta silti maxLabelDist-säteen
@@ -237,6 +232,14 @@ export function findPinRow(mapData, pin) {
     })
     if (label2 && best2 <= maxLabelDist * 1.5) { best = best2; label = label2 }
   }
+  // TILAPÄINEN DEBUG — näyttää lopullisen (fallbackin jälkeisen) tuloksen
+  console.log('[findPinRow] pin=(' + psx.toFixed(1) + ',' + psy.toFixed(1) + ') hitIdx=' + hitIdx +
+    ' hit=(' + hit.x.toFixed(1) + ',' + hit.y.toFixed(1) + ') chainLen=' + chain.length +
+    ' chainX=[' + chain.map(e => e.left.toFixed(0) + '-' + e.right.toFixed(0)).join(',') + ']' +
+    ' targetX=' + targetX.toFixed(1) + ' targetY=' + targetY.toFixed(1) +
+    ' localPitch=' + localPitch.toFixed(2) + ' labelYTol=' + labelYTol.toFixed(2) +
+    ' strict->' + strictLabel + '@' + strictBest.toFixed(1) +
+    ' FINAL->' + label + '@' + best.toFixed(1))
   if (!label || best > maxLabelDist * 1.5) return null
 
   // Palautetaan myös koko rivin (ketjun) lohkojen indeksit — näitä tarvitaan
