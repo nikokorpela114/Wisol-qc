@@ -268,8 +268,26 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     y: p.y * H * transform.scale + transform.ty
   }))
 
-  // Scale for text readability
-  const scaledFontSize = Math.max(7, Math.min(14, 10 / transform.scale))
+  // Rivinumeroiden koko: kasvaa maltillisesti kun zoomataan lähemmäs (max
+  // 20px ruudulla), mutta ei koskaan mene alle luettavan minimin (11px)
+  // kun zoomataan kauas. HUOM: tämä oli tässä tiedostossa jossain vaiheessa
+  // vahingossa palautunut takaisin vanhaan, korjattuun bugiin
+  // (scaledFontSize = 10/scale), joka aiheutti numeroiden paisumisen
+  // jättimäisiksi lähelle zoomatessa ja lähes näkymättömiksi kauas
+  // zoomatessa, koska SVG:n oma CSS-skaalaus kertautui laskennan päälle.
+  const desiredLabelPx = Math.max(11, Math.min(20, 11 + Math.log2(Math.max(0.5, transform.scale)) * 4))
+  const labelK = desiredLabelPx / 10 / transform.scale
+  const labelFontSize = 10 * labelK
+  const labelGap = 6 * labelK // pieni väli numerolapun ja itse rivin väliin, ettei laatikko peity pöydän päälle
+  const labelBoxH = 10 * labelK
+  const labelRx = 1 * labelK
+  // Jos rivien väli ruudulla käy niin pieneksi ettei edes yhden lapun
+  // korkeus enää mahdu ilman naapuririvin lapun kanssa päällekkäin
+  // menemistä, piilotetaan numerot kokonaan sen sijaan että ne
+  // sotkeutuisivat toisiinsa — sama vika joka korjattiin kerran aiemmin.
+  const scaleYmForLabels = H / (maxY - minY)
+  const rowSpacingPx = TABLE_DEPTH_M * scaleYmForLabels * transform.scale
+  const showRowLabels = rowSpacingPx > desiredLabelPx * 1.3
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
   return (
@@ -361,31 +379,39 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             )
           })}
 
-          {/* Row numbers - white bg for legibility */}
-          {rowNumbers.map((t, i) => (
-            <g key={`t${i}`}>
-              <rect
-                x={t.x - 8}
-                y={t.y - 8}
-                width={16}
-                height={10}
-                fill="white"
-                fillOpacity={0.75}
-                rx={1}
-              />
-              <text
-                x={t.x}
-                y={t.y}
-                fontSize={Math.max(9, scaledFontSize)}
-                fill="#0d1a6e"
-                fontFamily="sans-serif"
-                fontWeight="bold"
-                textAnchor="middle"
-              >
-                {t.text}
-              </text>
-            </g>
-          ))}
+          {/* Row numbers - white bg for legibility. Sijoitetaan lapun
+              VASEN reuna DXF:n tekstipisteeseen + pieni väli (ei enää
+              keskitetty pisteen päälle), jotta laatikko ei mene
+              pöydän päälle vaan istuu selkeästi sen jatkeena. */}
+          {rowNumbers.map((t, i) => {
+            if (!showRowLabels) return null
+            const bx = t.x + labelGap // laatikon vasen reuna
+            return (
+              <g key={`t${i}`}>
+                <rect
+                  x={bx}
+                  y={t.y - labelBoxH / 2}
+                  width={labelFontSize * 1.7}
+                  height={labelBoxH}
+                  fill="white"
+                  fillOpacity={0.85}
+                  rx={labelRx}
+                />
+                <text
+                  x={bx + labelFontSize * 0.85}
+                  y={t.y}
+                  dominantBaseline="middle"
+                  fontSize={labelFontSize}
+                  fill="#0d1a6e"
+                  fontFamily="sans-serif"
+                  fontWeight="bold"
+                  textAnchor="middle"
+                >
+                  {t.text}
+                </text>
+              </g>
+            )
+          })}
         </svg>
 
         {/* GPS dot overlay */}
