@@ -3,27 +3,85 @@ import React, { useRef, useEffect, useState, useCallback } from 'react'
 const PANEL_W_M = 1.15   // meters per panel (width along X)
 const TABLE_DEPTH_M = 4.29  // meters deep (Y direction, always fixed)
 
-export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, readOnly = false, extraPins = [], onViewChange }) {
+// HUOM: käytetään SAMAA tyhjää taulukkoa oletusarvona joka renderöinnillä.
+// Jos oletusarvo olisi kirjoitettu suoraan `focusPins = []` parametrina,
+// JavaScript loisi UUDEN taulukko-olion joka ikinen renderöinti — vaikka
+// sisältö on aina tyhjä, olion REFERENSSI muuttuu, mikä sai alla olevan
+// useEffect-riippuvuuslistan [W, H, focusPins] laukeamaan uudelleen JOKA
+// renderöinnillä. Se puolestaan resetoi näkymän takaisin alkuperäiseksi
+// välittömästi käyttäjän oman panoroinnin/zoomauksen jälkeen, jolloin
+// karttaa ei voinut enää liikuttaa itse ollenkaan.
+const EMPTY_PINS = []
+
+export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, readOnly = false, extraPins = EMPTY_PINS, onViewChange, focusPins = EMPTY_PINS }) {
   const containerRef = useRef(null)
   const [transform, setTransform] = useState({ scale: 1, tx: 0, ty: 0 })
   const stateRef = useRef({ scale: 1, tx: 0, ty: 0 })
+  const autoCenteredRef = useRef(false) // estää GPS-keskityksen toistumisen/ohittamisen käyttäjän oman panoroinnin jälkeen
 
   const { W, H, pvAreas, roads, boundaries, inserts, rowNumbers, minX, minY, maxX, maxY } = mapData
 
-  // Init: fit map in container
+  // Sovittaa näkymän annettujen pisteiden (normalisoitu 0..1) ympärille,
+  // reilulla marginaalilla — käytetään sekä asentajan yleiskartan
+  // "kohdista vikojen alueeseen" -toiminnossa (focusPins) että se on
+  // yleiskäyttöinen apu jota voi hyödyntää muuallakin jatkossa.
+  function fitToPoints(points, cw, ch) {
+    const xs = points.map(p => p.x * W), ys = points.map(p => p.y * H)
+    const minPX = Math.min(...xs), maxPX = Math.max(...xs)
+    const minPY = Math.min(...ys), maxPY = Math.max(...ys)
+    const w = Math.max(1, maxPX - minPX), h = Math.max(1, maxPY - minPY)
+    // Kiinteä minimimarginaali (esim. yhden pisteen tapaus, w/h≈0) plus
+    // suhteellinen marginaali isommille alueille.
+    const padX = Math.max(40, w * 0.35), padY = Math.max(40, h * 0.35)
+    const bw = w + 2 * padX, bh = h + 2 * padY
+    const scale = Math.min(8, Math.max(0.3, Math.min(cw / bw, ch / bh)))
+    const cx = (minPX + maxPX) / 2, cy = (minPY + maxPY) / 2
+    return { scale, tx: cw / 2 - cx * scale, ty: ch / 2 - cy * scale }
+  }
+
+  // Init: fit map in container — joko koko työmaan mukaan (oletus) tai
+  // focusPins-pisteiden ympärille (asentajan yleiskartta, "kohdista
+  // vikojen alueeseen" jottei tarvitse itse zoomata koko työmaasta).
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     const cw = el.clientWidth, ch = el.clientHeight
-    const scale = Math.min(cw / W, ch / H) * 0.95
-    const tx = (cw - W * scale) / 2
-    const ty = (ch - H * scale) / 2
-    stateRef.current = { scale, tx, ty }
-    setTransform({ scale, tx, ty })
+    let s
+    if (focusPins.length > 0) {
+      s = fitToPoints(focusPins, cw, ch)
+    } else {
+      const scale = Math.min(cw / W, ch / H) * 0.95
+      s = { scale, tx: (cw - W * scale) / 2, ty: (ch - H * scale) / 2 }
+    }
+    stateRef.current = s
+    setTransform(s)
     // PDF:n yksittäiskartturi (App.jsx) lukee o.mapView.containerW/H, joten
     // välitetään myös kontin mitat, ei pelkkää scale/tx/ty:tä.
-    if (onViewChange) onViewChange({ scale, tx, ty, containerW: cw, containerH: ch })
-  }, [W, H])
+    if (onViewChange) onViewChange({ ...s, containerW: cw, containerH: ch })
+  }, [W, H, focusPins])
+
+  // Kertaluontoinen GPS-keskitys UUDELLE (pin=null) havainnolle — ilman
+  // tätä työnjohtaja joutui aina zoomailemaan/etsimään itsensä koko
+  // työmaan kartalta. Kun GPS-sijainti ensimmäisen kerran saadaan, ja
+  // havainnolla ei vielä ole pinniä eikä focusPins-tilaa ole käytössä
+  // (silloin alustus hoiti jo kohdistuksen), keskitetään näkymä lähelle
+  // omaa sijaintia kohtuullisen läheisellä zoomilla. Tämä tapahtuu vain
+  // KERRAN (autoCenteredRef) — ei väkisin vedä näkymää takaisin jos
+  // käyttäjä on jo ehtinyt itse panoroida/zoomata (merkitään "käytetyksi"
+  // myös manuaalisen vuorovaikutuksen alkaessa, ks. alempana).
+  useEffect(() => {
+    if (autoCenteredRef.current || pin || focusPins.length > 0 || !gpsCoords) return
+    const el = containerRef.current
+    if (!el) return
+    autoCenteredRef.current = true
+    const cw = el.clientWidth, ch = el.clientHeight
+    const scale = Math.min(8, Math.max(1.5, Math.min(cw / W, ch / H) * 5))
+    const gx = gpsCoords.x * W, gy = gpsCoords.y * H
+    const s = clamp({ scale, tx: cw / 2 - gx * scale, ty: ch / 2 - gy * scale })
+    stateRef.current = s
+    setTransform(s)
+    if (onViewChange) onViewChange({ ...s, containerW: cw, containerH: ch })
+  }, [gpsCoords, pin])
 
   const applyTransform = useCallback((s) => {
     stateRef.current = s
@@ -52,6 +110,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
 
   const onTouchStart = useCallback((e) => {
     e.preventDefault()
+    autoCenteredRef.current = true // käyttäjä koski karttaa itse — GPS-autokeskitys ei saa enää yrittää vetää näkymää
     const s = stateRef.current
     if (e.touches.length === 1) {
       touchRef.current = {
@@ -131,6 +190,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
 
   const onMouseDown = useCallback((e) => {
     if (e.target.tagName === 'BUTTON') return
+    autoCenteredRef.current = true
     const s = stateRef.current
     mouseRef.current = { startX: e.clientX, startY: e.clientY, tx: s.tx, ty: s.ty, moved: false }
   }, [])
@@ -163,6 +223,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
   // --- Desktop scroll wheel zoom ---
   const onWheel = useCallback((e) => {
     e.preventDefault()
+    autoCenteredRef.current = true
     const el = containerRef.current
     if (!el) return
     const s = stateRef.current
@@ -207,12 +268,14 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     y: p.y * H * transform.scale + transform.ty
   }))
 
-  // Rivinumeroiden fonttikoko — pysyy samankokoisena ruudulla zoomista
-  // riippumatta (fontSize SVG-yksikköinä × transform.scale = vakio
-  // ruutupikseliä). Vain yläkatto (14) rajoittaa arvoa kun ollaan pahasti
-  // uloszoomattuna — EI alarajaa, koska alaraja sai ruutukoon kasvamaan
-  // rajatta zoomatessa sisään (SVG-yksikkö pysyi vakiona vaikka scale kasvoi).
-  const scaledFontSize = Math.min(14, Math.max(0.8, 10 / transform.scale))
+  // Rivinumeroiden fonttikoko — yksinkertainen, käyttäjän itse
+  // käytännössä toimivaksi vahvistama kaava vanhasta, aiemmin hyvin
+  // toimineesta versiosta. Aiemmat yritykset "parantaa" tätä (g-transform,
+  // HTML-elementit, törmäystarkistukset, sivusiirrot) osoittautuivat
+  // toistuvasti huonommiksi käytännön käytössä kuin tämä yksinkertainen
+  // alkuperäinen — joten luotetaan nyt tositestattuun ratkaisuun teorian
+  // sijaan.
+  const scaledFontSize = Math.max(7, Math.min(14, 10 / transform.scale))
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
   return (
@@ -229,23 +292,16 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
         onMouseLeave={onMouseLeave}
         onWheel={onWheel}
       >
-        {/* SVG Map
-            HUOM: EI willChange:'transform' tässä. Se saa monet selaimet
-            (erityisesti mobiili-Safarin) ylentämään tämän SVG:n omaksi GPU-
-            kerrokseksi, jonka selain rasteroi KERTAALLEEN kiinteään
-            pikseliresoluutioon ja sen jälkeen vain venyttää bittikarttana
-            pinch/zoomin aikana — vaikka SVG on vektorigrafiikkaa ja pysyisi
-            muuten terävänä millä tahansa zoomilla. */}
+        {/* SVG Map */}
         <svg
           width={W}
           height={H}
           viewBox={`0 0 ${W} ${H}`}
           style={{
             position: 'absolute',
-            width: W, height: H,
             transform: `translate(${transform.tx}px, ${transform.ty}px) scale(${transform.scale})`,
             transformOrigin: '0 0',
-            shapeRendering: 'geometricPrecision'
+            willChange: 'transform'
           }}
         >
           <rect width={W} height={H} fill="#eef4ec" />
@@ -304,7 +360,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
                 width={tw}
                 height={th}
                 fill="#1a2fcc"
-                fillOpacity={0.18}
+                fillOpacity={0.32}
                 stroke="#1a2fcc"
                 strokeWidth={strokeW * 0.5}
               />
@@ -312,23 +368,21 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
           })}
 
           {/* Row numbers - white bg for legibility */}
-          {rowNumbers.map((t, i) => {
-            const rw = scaledFontSize * 1.7, rh = scaledFontSize * 1.05
-            return (
+          {rowNumbers.map((t, i) => (
             <g key={`t${i}`}>
               <rect
-                x={t.x - rw / 2}
-                y={t.y - rh / 2 - scaledFontSize * 0.15}
-                width={rw}
-                height={rh}
+                x={t.x - 8}
+                y={t.y - 8}
+                width={16}
+                height={10}
                 fill="white"
                 fillOpacity={0.75}
-                rx={Math.max(0.3, scaledFontSize * 0.1)}
+                rx={1}
               />
               <text
                 x={t.x}
                 y={t.y}
-                fontSize={scaledFontSize}
+                fontSize={Math.max(9, scaledFontSize)}
                 fill="#0d1a6e"
                 fontFamily="sans-serif"
                 fontWeight="bold"
@@ -337,8 +391,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
                 {t.text}
               </text>
             </g>
-            )
-          })}
+          ))}
         </svg>
 
         {/* GPS dot overlay */}
