@@ -6,7 +6,7 @@ import { sb } from './supabaseClient.js'
 import InstallerView from './InstallerView.jsx'
 import Dashboard from './Dashboard.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
-import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage, compressImage } from './shared.js'
+import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage } from './shared.js'
 
 const CATS = [
   'Paneeli rikkoutunut', 'Paneeli väärinpäin, yläreuna', 'Paneeli väärinpäin, alareuna',
@@ -377,7 +377,29 @@ export default function App() {
   // each, which is both slow to work with and too big to keep safely in a
   // local backup — this keeps them small without a noticeable quality loss
   // in the PDF (which is only ever printed at CW page width anyway).
-  // compressImage tuodaan shared.js:stä (jaettu App.jsx:n ja InstallerView.jsx:n kesken)
+  function compressImage(file, maxDim = 1600, quality = 0.75) {
+    return new Promise(resolve => {
+      const reader = new FileReader()
+      reader.onload = e => {
+        const img = new Image()
+        img.onload = () => {
+          let { width, height } = img
+          if (width > maxDim || height > maxDim) {
+            const scale = maxDim / Math.max(width, height)
+            width = Math.round(width * scale); height = Math.round(height * scale)
+          }
+          const c = document.createElement('canvas')
+          c.width = width; c.height = height
+          c.getContext('2d').drawImage(img, 0, 0, width, height)
+          resolve(c.toDataURL('image/jpeg', quality))
+        }
+        img.onerror = () => resolve(e.target.result)
+        img.src = e.target.result
+      }
+      reader.onerror = () => resolve(null)
+      reader.readAsDataURL(file)
+    })
+  }
 
   async function addPhotos(id, files) {
     for (const file of Array.from(files)) {
