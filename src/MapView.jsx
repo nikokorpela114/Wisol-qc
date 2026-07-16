@@ -19,7 +19,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
   const stateRef = useRef({ scale: 1, tx: 0, ty: 0 })
   const autoCenteredRef = useRef(false) // estää GPS-keskityksen toistumisen/ohittamisen käyttäjän oman panoroinnin jälkeen
 
-  const { W, H, pvAreas, roads, boundaries, inserts, rowNumbers, minX, minY, maxX, maxY } = mapData
+  const { W, H, pvAreas, roads, boundaries, inserts, panelAreas = [], rowNumbers, minX, minY, maxX, maxY } = mapData
 
   // Sovittaa näkymän annettujen pisteiden (normalisoitu 0..1) ympärille,
   // reilulla marginaalilla — käytetään sekä asentajan yleiskartan
@@ -381,6 +381,25 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
               />
             )
           })}
+
+          {/* Muun wattiluokan / erillisenä polygonina piirretyt paneelipöydät
+              (esim. layerit '665 Wp', '670 Wp', 'Extra panels'). Nämä eivät
+              tule INSERT-blokkeina kuten yllä olevat, vaan valmiina ääri-
+              viivoina DXF:stä — siksi ne piirretään suoraan <polygon>:ina
+              eikä lasketa x/y/panels-pohjaisesta suorakulmiosta. Sama
+              sininen tyyli kuin muillakin pöydillä, jotta ne eivät erotu
+              omana kategorianaan kartalla — ne OVAT paneelipöytiä, vain eri
+              tavalla merkittyjä DXF:ssä. */}
+          {panelAreas.map((pts, i) => (
+            <polygon
+              key={`pa${i}`}
+              points={pts.map(p => p.join(',')).join(' ')}
+              fill="#1a2fcc"
+              fillOpacity={0.32}
+              stroke="#1a2fcc"
+              strokeWidth={strokeW * 0.5}
+            />
+          ))}
 
         </svg>
 

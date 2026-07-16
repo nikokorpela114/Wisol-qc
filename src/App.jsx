@@ -97,6 +97,16 @@ function renderGroupMapImage(mapData, items) {
     mctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
   })
 
+  // Muun wattiluokan / polygonina piirretyt paneelipöydät (665 Wp / 670 Wp /
+  // Extra panels) — ks. selitys MapView.jsx:ssä/dxfParser.js:ssä.
+  ;(mapData.panelAreas || []).forEach(pts => {
+    mctx.fillStyle = 'rgba(26,47,204,0.18)'
+    mctx.strokeStyle = '#1a2fcc'
+    mctx.lineWidth = 0.6
+    mctx.beginPath(); pts.forEach(([x, y2], i) => i === 0 ? mctx.moveTo(px(x), py(y2)) : mctx.lineTo(px(x), py(y2)))
+    mctx.closePath(); mctx.fill(); mctx.stroke()
+  })
+
   mctx.textAlign = 'center'
   mapData.rowNumbers.forEach(t => {
     mctx.font = 'bold 12px sans-serif'
@@ -449,7 +459,6 @@ export default function App() {
       const clone = {
         id, cat: o.cat, sev: o.sev, note: '', muu: o.muu, photos: [],
         pin, db_id: null, createdAt: new Date().toISOString(),
-        clonedFrom: o.id,
       }
       setObs(prev => [...prev, clone])
       saveObs(clone, site, inspector, rivi)
@@ -770,6 +779,16 @@ export default function App() {
             mctx.strokeRect(px(ins.x), py(ins.y), tw, th)
           })
 
+          // Muun wattiluokan / polygonina piirretyt paneelipöydät (665 Wp /
+          // 670 Wp / Extra panels) — ks. selitys MapView.jsx:ssä/dxfParser.js:ssä.
+          ;(mapData.panelAreas || []).forEach(pts => {
+            mctx.fillStyle = 'rgba(26,47,204,0.22)'
+            mctx.strokeStyle = '#1a2fcc'
+            mctx.lineWidth = 0.7
+            mctx.beginPath(); pts.forEach(([x,y2],i) => i===0 ? mctx.moveTo(px(x),py(y2)) : mctx.lineTo(px(x),py(y2)))
+            mctx.closePath(); mctx.fill(); mctx.stroke()
+          })
+
           mctx.textAlign = 'center'
           mapData.rowNumbers.forEach((t, idx) => {
             const isPinLabel = idx === pinLabelIdx
@@ -1017,7 +1036,6 @@ export default function App() {
                       onPin={pin => handleMapTap(o, pin)}
                       gpsCoords={gpsCoords}
                       onViewChange={view => setMapView(o.id, view)}
-                      extraPins={quickAddId === o.id ? obs.filter(x => x.clonedFrom === o.id).map(x => x.pin) : []}
                     />
                     {o.pin && (() => {
                       const r = findPinRow(mapData, o.pin)
