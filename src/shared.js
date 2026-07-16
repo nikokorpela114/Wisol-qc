@@ -192,7 +192,7 @@ export function findPinRow(mapData, pin) {
   const gapTol = 45 * sxm
   const rowY = hit.y + localPitch / 2
 
-  // Tarkistaa kulkeeko jokin "raja-viiva" kahden lohkon välistä. Tähän
+  // Tarkistaa kulkeeko jokin "raja-viiva" kahden pisteen välistä. Tähän
   // lasketaan sekä tiet (mapData.roads) että aluerajat — dxfParser.js lukee
   // DXF:n "Aluejako"-tason (eri numeroitujen alueiden väliset rajaviivat,
   // esim. A5/A6-alueiden raja) samaan pvAreas-joukkoon kuin itse
@@ -201,17 +201,27 @@ export function findPinRow(mapData, pin) {
   // numeroitua aluetta (esim. rivit 61/63/65 alueella A5 ja 70/72/74
   // alueella A6) saattoivat ketjuuntua samaksi riviksi, koska niiden
   // välissä oleva aluerajaviiva ei ollut "tie" eikä siis pysäyttänyt ketjua.
+  //
+  // HUOM: tämä on YLEINEN jana-jana-leikkaustesti, ei enää oleteta että
+  // kysytty jana on vaakasuora kiinteällä rivin Y-korkeudella (yA/yB
+  // oletusarvoisesti rowY, joten INSERT-ketjutuksen vanhat kutsut
+  // toimivat ennallaan). Tätä tarvittiin koska monet tiet KIERTÄVÄT
+  // nimettyjen alueiden reunoja viistosti sen sijaan että ylittäisivät
+  // suoraan täsmälleen rivin oman vaakatason — pelkkä "ylittääkö tie
+  // juuri tämän Y-tason" -testi ei nähnyt niitä, vaikka tie kulki
+  // selvästi rivin ja kaukaisen numerolapun välissä.
   const boundaryPolylines = [...mapData.roads, ...mapData.pvAreas]
-  const crossesBoundary = (xA, xB) => {
-    const lo = Math.min(xA, xB), hi = Math.max(xA, xB)
+  const cross2 = (ax, ay, bx, by) => ax * by - ay * bx
+  const crossesBoundary = (xA, xB, yA = rowY, yB = rowY) => {
     return boundaryPolylines.some(pts => {
       for (let i = 0; i < pts.length - 1; i++) {
         const [x1, y1] = pts[i], [x2, y2] = pts[i + 1]
-        if ((y1 - rowY) * (y2 - rowY) > 0) continue // segmentti ei ylitä rivin Y-tasoa
-        if (y1 === y2) continue
-        const t = (rowY - y1) / (y2 - y1)
-        const cx = x1 + t * (x2 - x1)
-        if (cx >= lo && cx <= hi) return true
+        const d1 = cross2(x2 - x1, y2 - y1, xA - x1, yA - y1)
+        const d2 = cross2(x2 - x1, y2 - y1, xB - x1, yB - y1)
+        const d3 = cross2(xB - xA, yB - yA, x1 - xA, y1 - yA)
+        const d4 = cross2(xB - xA, yB - yA, x2 - xA, y2 - yA)
+        if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+            ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true
       }
       return false
     })
@@ -273,7 +283,7 @@ export function findPinRow(mapData, pin) {
     // jo käytetään INSERT-lohkojen ketjutuksessa estämään rivin
     // muodostuminen yli aluerajan, käytetään nyt myös tässä: numerolappu
     // hylätään jos sen ja rivin kohdepisteen välissä kulkee Aluejako-raja.
-    if (crossesBoundary(targetX, t.x)) return
+    if (crossesBoundary(targetX, t.x, targetY, t.y)) return
     const d = Math.hypot(t.x - targetX, t.y - targetY)
     if (d < best) { best = d; label = t.text }
   })
