@@ -55,6 +55,20 @@ export const PDF_STR = {
   },
 }
 
+// Ray-casting point-in-polygon testi. Käytetään findPinRow:ssa tunnistamaan
+// kun pinni osuu polygonina piirrettyyn paneelialueeseen (mapData.panelAreas
+// — layerit '665 Wp' / '670 Wp' / 'Extra panels', ks. dxfParser.js) jolla ei
+// ole samaa säännöllistä INSERT-rivirakennetta kuin tavallisilla pöydillä.
+function pointInPolygon(x, y, pts) {
+  let inside = false
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j]
+    const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+    if (intersect) inside = !inside
+  }
+  return inside
+}
+
 // Given mapData and a normalized pin ({x,y} as 0..1 fractions of mapData.W/H),
 // find which row the pin lands in and the nearest row-number label.
 //
@@ -105,7 +119,27 @@ export function findPinRow(mapData, pin) {
     })
     if (bestDist > th * 1.2) hitIdx = -1 // liian kaukana ollakseen luotettava arvaus
   }
-  if (hitIdx < 0) return null
+  if (hitIdx < 0) {
+    // Napautus voi osua paneelialueeseen joka on piirretty POLYGONINA
+    // eikä INSERT-lohkoina (mapData.panelAreas — '665 Wp' / '670 Wp' /
+    // 'Extra panels', ks. dxfParser.js). Näillä ei ole samaa säännöllistä
+    // rivirakennetta kuin tavallisilla pöydillä, joten emme voi ketjuttaa
+    // niitä riviksi samalla logiikalla — mutta pinni osuu silti oikeaan
+    // paneelialueeseen, joten näytetään lähin uskottava rivinumero sen
+    // sijaan että näytetään ei mitään ("Havaittu rivi" katoaa) tai
+    // arvataan täysin väärä, kaukainen INSERT-rivi (esim. "65" kun
+    // fyysisesti ollaan rivin 29 kohdalla).
+    const insidePanelArea = mapData.panelAreas?.some(pts => pointInPolygon(psx, psy, pts))
+    if (insidePanelArea) {
+      let best = Infinity, label = null
+      mapData.rowNumbers.forEach(t => {
+        const d = Math.hypot(t.x - psx, t.y - psy)
+        if (d < best) { best = d; label = t.text }
+      })
+      if (label && best <= th * 6) return { rowIdx: -1, label, rowInsertIdxs: [] }
+    }
+    return null
+  }
   const hit = mapData.inserts[hitIdx]
 
   // 1b. Mitataan TODELLINEN rivi-väli tällä alueella heti, hit.x:n
