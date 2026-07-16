@@ -6,7 +6,7 @@ import { sb } from './supabaseClient.js'
 import InstallerView from './InstallerView.jsx'
 import Dashboard from './Dashboard.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
-import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage, compressImage } from './shared.js'
+import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, renderGroupMapImage, compressImage } from './shared.js'
 
 const CATS = [
   'Paneeli rikkoutunut', 'Paneeli väärinpäin, yläreuna', 'Paneeli väärinpäin, alareuna',
@@ -481,19 +481,17 @@ export default function App() {
         // One combined map for every pin in this category, numbered to match
         // the list below.
         const withPin = g.items.filter(o => o.pin)
-        let rowLabelByItem = new Map()
         if (withPin.length && mapData) {
           if (y + 150 > 278) { doc.addPage(); y = 18 }
           doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(100, 100, 120)
           doc.text(T.location, M + 2, y); y += 4.5
           try {
-            const { dataUrl, outW, outH, rowLabels } = renderGroupMapImage(mapData, withPin)
+            const { dataUrl, outW, outH } = renderGroupMapImage(mapData, withPin)
             let pdfW = CW, pdfH = pdfW * (outH / outW)
             if (pdfH > 150) { pdfH = 150; pdfW = pdfH * (outW / outH) }
             if (y + pdfH > 278) { doc.addPage(); y = 18 }
             doc.addImage(dataUrl, 'JPEG', M, y, pdfW, pdfH)
             y += pdfH + 4
-            withPin.forEach((o, idx) => rowLabelByItem.set(o, rowLabels[idx]))
           } catch (e) { console.error('Group map PDF:', e) }
         }
 
@@ -503,11 +501,9 @@ export default function App() {
           if (y + 16 > 278) { doc.addPage(); y = 18 }
           const sevLabel = lang === 'en' ? (SEV_EN[o.sev] || o.sev) : o.sev
           const sc = sevCol[o.sev] || [80, 80, 80]
-          const rowLbl = rowLabelByItem.get(o)
-          const rowStr = rowLbl ? `  (${T.row} ${rowLbl})` : ''
           const timeStr = o.createdAt ? '  ' + new Date(o.createdAt).toLocaleTimeString(T.dateLocale, { hour: '2-digit', minute: '2-digit' }) : ''
           doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sc)
-          doc.text(`${idx + 1}. ${sevLabel}${rowStr}${timeStr}`, M + 2, y)
+          doc.text(`${idx + 1}. ${sevLabel}${timeStr}`, M + 2, y)
           y += 5.5
           if (o.note) {
             doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(60, 60, 60)
@@ -582,27 +578,13 @@ export default function App() {
       if (o.pin && mapData) {
         if (y + 150 > 278) { doc.addPage(); y = 18 }
         doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(100, 100, 120)
-        // Uses the shared findPinRow (shared.js), which groups all insert
-        // segments at the same height into one logical row and restricts
-        // the label search to that same row band — fixes the earlier bug
-        // where a pin in the leftmost segment of a row could grab a
-        // completely different row's number label.
-        const rowInfoPdf = findPinRow(mapData, o.pin)
-        doc.text(`${T.location}${rowInfoPdf ? '  (' + T.row + ' ' + rowInfoPdf.label + ')' : ''}`, M + 2, y); y += 4
+        doc.text(T.location, M + 2, y); y += 4
         try {
           const PANEL_W = 1.15, TABLE_D = 4.29
           const sxm = mapData.W / (mapData.maxX - mapData.minX)
           const sym = mapData.H / (mapData.maxY - mapData.minY)
 
           const pinSvgX = o.pin.x * mapData.W, pinSvgY = o.pin.y * mapData.H
-          const pinRowIdx = rowInfoPdf ? rowInfoPdf.rowIdx : -1
-          const pinRowInsertIdxs = rowInfoPdf ? rowInfoPdf.rowInsertIdxs : []
-          let pinLabelIdx = -1
-          if (rowInfoPdf) {
-            mapData.rowNumbers.forEach((t, idx) => {
-              if (t.text === rowInfoPdf.label) pinLabelIdx = idx
-            })
-          }
 
           // Work out the crop window (in SVG units) using the zoom level left
           // on screen, centered on the pin — not the saved pan position, so a
@@ -638,13 +620,12 @@ export default function App() {
             mctx.closePath(); mctx.fill(); mctx.stroke()
           })
 
-          mapData.inserts.forEach((ins, idx) => {
+          mapData.inserts.forEach((ins) => {
             const tw = ins.panels * PANEL_W * sxm * kx
             const th = TABLE_D * sym * ky
-            const isPinRow = pinRowInsertIdxs.includes(idx)
-            mctx.fillStyle = isPinRow ? 'rgba(214,48,48,0.35)' : 'rgba(26,47,204,0.22)'
-            mctx.strokeStyle = isPinRow ? '#d63030' : '#1a2fcc'
-            mctx.lineWidth = isPinRow ? 2 : 0.7
+            mctx.fillStyle = 'rgba(26,47,204,0.22)'
+            mctx.strokeStyle = '#1a2fcc'
+            mctx.lineWidth = 0.7
             // ins.y = pöydän yläreuna (todistetusti oikea konventio)
             mctx.fillRect(px(ins.x), py(ins.y), tw, th)
             mctx.strokeRect(px(ins.x), py(ins.y), tw, th)
@@ -661,21 +642,12 @@ export default function App() {
           })
 
           mctx.textAlign = 'center'
-          mapData.rowNumbers.forEach((t, idx) => {
-            const isPinLabel = idx === pinLabelIdx
-            if (isPinLabel) {
-              mctx.font = 'bold 17px sans-serif'
-              mctx.fillStyle = '#d63030'
-              mctx.fillRect(px(t.x)-14, py(t.y)-13, 28, 18)
-              mctx.fillStyle = '#ffffff'
-              mctx.fillText(t.text, px(t.x), py(t.y)+3)
-            } else {
-              mctx.font = 'bold 12px sans-serif'
-              mctx.fillStyle = 'rgba(255,255,255,0.75)'
-              mctx.fillRect(px(t.x)-9, py(t.y)-9, 18, 12)
-              mctx.fillStyle = '#0d1a6e'
-              mctx.fillText(t.text, px(t.x), py(t.y)+1)
-            }
+          mapData.rowNumbers.forEach((t) => {
+            mctx.font = 'bold 12px sans-serif'
+            mctx.fillStyle = 'rgba(255,255,255,0.75)'
+            mctx.fillRect(px(t.x)-9, py(t.y)-9, 18, 12)
+            mctx.fillStyle = '#0d1a6e'
+            mctx.fillText(t.text, px(t.x), py(t.y)+1)
           })
 
           // Pin — kept deliberately small since several faults can sit close
@@ -823,13 +795,11 @@ export default function App() {
 
           {obs.map((o, idx) => {
             if (collapsedIds.has(o.id)) {
-              const rowInfo = o.pin && mapData ? findPinRow(mapData, o.pin) : null
               return (
                 <div key={o.id} style={{ background: '#fff', border: '1px solid #d0d5e8', borderRadius: 10, padding: '9px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                     <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 7px', borderRadius: 20, background: sevBg[o.sev], color: sevColor[o.sev], flexShrink: 0 }}>{o.sev}</span>
                     <span style={{ fontSize: 13, fontWeight: 600, color: '#222', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.cat}</span>
-                    {rowInfo && <span style={{ fontSize: 11, color: '#1a8a50', fontWeight: 700, flexShrink: 0 }}>rivi {rowInfo.label}</span>}
                   </div>
                   <div style={{ display: 'flex', gap: 10, flexShrink: 0, alignItems: 'center' }}>
                     <button onClick={() => expandObs(o.id)} style={{ background: 'none', border: 'none', color: '#1a2fcc', fontSize: 12, fontWeight: 700 }}>Avaa</button>
@@ -909,14 +879,6 @@ export default function App() {
                       onViewChange={view => setMapView(o.id, view)}
                       extraPins={quickAddId === o.id ? obs.filter(x => x.clonedFrom === o.id).map(x => x.pin) : []}
                     />
-                    {o.pin && (() => {
-                      const r = findPinRow(mapData, o.pin)
-                      return r ? (
-                        <div style={{ marginTop: 4, fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
-                          📍 Havaittu rivi: {r.label}
-                        </div>
-                      ) : null
-                    })()}
                     {o.pin && (
                       <div style={{ marginTop: 8 }}>
                         {quickAddId === o.id ? (

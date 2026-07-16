@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
-import { KNOWN_SITES, findPinRow, renderPinMapThumb, CAT_EN, SEV_EN, compressImage } from './shared.js'
+import { KNOWN_SITES, renderPinMapThumb, CAT_EN, SEV_EN, compressImage } from './shared.js'
 import { subscribeToPush, sendPushNotification } from './push.js'
 import MapView from './MapView.jsx'
 
@@ -329,7 +329,6 @@ export default function InstallerView() {
               onPin={scrollToNearestTask}
               gpsCoords={gpsCoords}
               extraPins={overviewPins}
-              focusPins={overviewPins}
               readOnly
               height={200}
             />
@@ -342,7 +341,6 @@ export default function InstallerView() {
         {tasks && tasks.map(o => {
           const catLabel = lang === 'en' ? (CAT_EN[o.cat] || o.cat) : o.cat
           const sevLabel = lang === 'en' ? (SEV_EN[o.sev] || o.sev) : o.sev
-          const rowInfo = mapData && o.pin_x != null ? findPinRow(mapData, { x: o.pin_x, y: o.pin_y }) : null
           return (
             <div
               key={o.id}
@@ -371,11 +369,6 @@ export default function InstallerView() {
                     />
                   ) : (
                     <div style={{ height: 160, background: '#eef4ec', borderRadius: 8 }} />
-                  )}
-                  {rowInfo && (
-                    <div style={{ marginTop: 4, fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
-                      📍 {t('row')}: {rowInfo.label}
-                    </div>
                   )}
                 </div>
               )}

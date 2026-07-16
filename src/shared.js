@@ -342,28 +342,18 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
   const th = TABLE_DEPTH_M * sym
 
   const psx = pin.x * mapData.W, psy = pin.y * mapData.H
-  const info = findPinRow(mapData, pin)
-  const highlightIdx = new Set(info ? info.rowInsertIdxs : [])
 
-  // Crop around the pin's ENTIRE detected row (every segment of it), not
-  // just a fixed radius around the pin point — a tight radius-only crop
-  // showed a single anonymous colour block with no row number and no way
-  // to tell where along a long row the pin actually sat. Showing the whole
-  // row (plus its number label) instead always gives that context.
-  let minX = psx, maxX = psx, minY = psy, maxY = psy
-  highlightIdx.forEach(idx => {
-    const ins = mapData.inserts[idx]
-    const left = ins.x, right = ins.x + ins.panels * PANEL_W_M * sxm
-    if (left < minX) minX = left
-    if (right > maxX) maxX = right
-    if (ins.y < minY) minY = ins.y
-    if (ins.y + th > maxY) maxY = ins.y + th
-  })
+  // Automaattinen rivintunnistus/-korostus poistettu käytöstä kokonaan
+  // (osoittautui epäluotettavaksi paikoin, ks. keskustelu) — kartta
+  // näyttää nyt vain pinnin ja sitä ympäröivät pöydät kiinteän kokoisena
+  // rajauksena, ilman minkäänlaista "tämä on oikea rivi" -päättelyä tai
+  // -korostusta.
+  const cropHalfW = th * 12, cropHalfH = th * 4
+  const minX = psx - cropHalfW, maxX = psx + cropHalfW
+  const minY = psy - cropHalfH, maxY = psy + cropHalfH
 
-  const padX = Math.max(6 * sxm, (maxX - minX) * 0.05)
-  const padY = Math.max(9 * sym, (maxY - minY) * 0.2)
-  const svgX0 = Math.max(0, minX - padX), svgX1 = Math.min(mapData.W, maxX + padX)
-  const svgY0 = Math.max(0, minY - padY), svgY1 = Math.min(mapData.H, maxY + padY)
+  const svgX0 = Math.max(0, minX), svgX1 = Math.min(mapData.W, maxX)
+  const svgY0 = Math.max(0, minY), svgY1 = Math.min(mapData.H, maxY)
   const svgCropW = Math.max(1, svgX1 - svgX0), svgCropH = Math.max(1, svgY1 - svgY0)
 
   const outH = Math.round(outW * svgCropH / svgCropW)
@@ -380,23 +370,20 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
     ctx.closePath(); ctx.fill(); ctx.stroke()
   })
 
-  mapData.inserts.forEach((ins, idx) => {
+  mapData.inserts.forEach((ins) => {
     const right = ins.x + ins.panels * PANEL_W_M * sxm
     const left = ins.x
     if (right < svgX0 || left > svgX1 || ins.y + th < svgY0 || ins.y > svgY1) return // skip off-screen tables
     const tw = ins.panels * PANEL_W_M * sxm * kx, thpx = TABLE_DEPTH_M * sym * ky
-    const isHi = highlightIdx.has(idx)
-    ctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
-    ctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
-    ctx.lineWidth = isHi ? 1.4 : 0.5
+    ctx.fillStyle = 'rgba(26,47,204,0.18)'
+    ctx.strokeStyle = '#1a2fcc'
+    ctx.lineWidth = 0.5
     ctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
     ctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
   })
 
   // Muun wattiluokan / polygonina piirretyt paneelipöydät (665 Wp / 670 Wp /
-  // Extra panels) — ks. selitys MapView.jsx:ssä/dxfParser.js:ssä. Ei ole
-  // per-rivi highlightausta koska näillä ei ole yksittäistä rivi-indeksiä
-  // kuten mapData.inserts:illä.
+  // Extra panels) — ks. selitys MapView.jsx:ssä/dxfParser.js:ssä.
   ;(mapData.panelAreas || []).forEach(pts => {
     ctx.fillStyle = 'rgba(26,47,204,0.18)'
     ctx.strokeStyle = '#1a2fcc'
@@ -442,42 +429,19 @@ export function renderGroupMapImage(mapData, items) {
 
   const pins = items.map(o => ({ x: o.pin.x * mapData.W, y: o.pin.y * mapData.H }))
 
-  // Find each pin's full row (using the shared, bug-fixed findPinRow) once,
-  // and reuse it both for highlighting and for sizing the crop.
-  const rowInfos = items.map(o => findPinRow(mapData, o.pin))
-  const highlightIdx = new Set()
-  const rowLabels = rowInfos.map(info => {
-    if (info) info.rowInsertIdxs.forEach(idx => highlightIdx.add(idx))
-    return info ? info.label : null
-  })
-
+  // Automaattinen rivintunnistus/-korostus poistettu käytöstä kokonaan
+  // (osoittautui epäluotettavaksi paikoin, ks. keskustelu) — kartta
+  // näyttää nyt vain numeroidut pinnit ja niitä ympäröivät pöydät, ilman
+  // minkäänlaista "tämä on oikea rivi" -päättelyä tai -korostusta.
   let minX = Math.min(...pins.map(p => p.x)), maxX = Math.max(...pins.map(p => p.x))
   let minY = Math.min(...pins.map(p => p.y)), maxY = Math.max(...pins.map(p => p.y))
 
-  // Expand the bounding box to cover each pin's ENTIRE row — every segment
-  // of the chain findPinRow found, not just a fixed radius around the pin
-  // point. HUOM: ins.y on pöydän YLÄREUNA (todistetusti oikea konventio),
-  // pöytä ulottuu ALASPÄIN siitä.
-  highlightIdx.forEach(idx => {
-    const ins = mapData.inserts[idx]
-    const left = ins.x, right = ins.x + ins.panels * PANEL_W_M * sxm
-    if (left < minX) minX = left
-    if (right > maxX) maxX = right
-    if (ins.y < minY) minY = ins.y
-    if (ins.y + th > maxY) maxY = ins.y + th
-  })
-
-  // Aiemmin marginaali oli hyvin pieni (5 % / kiinteä 6 yksikköä), jolloin
-  // rajaus näytti VAIN itse pisteiden rivin ilman mitään ympäröivää
-  // kontekstia — asentajan oli mahdotonta hahmottaa mihin kohtaan koko
-  // riviä tai työmaata tämä pätkä sijoittuu, koska yhtään naapuririvin
-  // numerolappua ei näkynyt vertailukohdaksi. Pystysuunnassa marginaali on
-  // nyt sidottu pöydän syvyyteen (th) niin että ainakin osa rivin ylä- ja
-  // alapuolisesta naapuririvistä (numerolappuineen) jää aina näkyviin,
-  // vaakasuunnassa marginaali on reilusti suurempi jotta rivin päät/jatko
-  // hahmottuvat paremmin.
-  const padX = Math.max(40 * sxm, (maxX - minX) * 0.15)
-  const padY = Math.max(th * 1.8, (maxY - minY) * 0.35)
+  // Reilu kiinteä marginaali pisteiden ympärille (aiemmin rajaus laajeni
+  // koko havaitun rivin mukaan — nyt sitä ei ole, joten käytetään
+  // pöydän mittoihin sidottua kiinteää marginaalia jotta pisteiden
+  // ympäriltä näkyy edes jonkin verran kontekstia).
+  const padX = Math.max(th * 10, (maxX - minX) * 0.15)
+  const padY = Math.max(th * 3, (maxY - minY) * 0.35)
   const svgX0 = Math.max(0, minX - padX)
   const svgY0 = Math.max(0, minY - padY)
   const svgX1 = Math.min(mapData.W, maxX + padX)
@@ -498,14 +462,12 @@ export function renderGroupMapImage(mapData, items) {
     mctx.closePath(); mctx.fill(); mctx.stroke()
   })
 
-  mapData.inserts.forEach((ins, idx) => {
+  mapData.inserts.forEach((ins) => {
     const tw = ins.panels * PANEL_W_M * sxm * kx
     const thpx = TABLE_DEPTH_M * sym * ky
-    const isHi = highlightIdx.has(idx)
-    mctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
-    mctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
-    mctx.lineWidth = isHi ? 1.6 : 0.6
-    // ins.y = pöydän yläreuna, pöytä ulottuu alaspäin siitä.
+    mctx.fillStyle = 'rgba(26,47,204,0.18)'
+    mctx.strokeStyle = '#1a2fcc'
+    mctx.lineWidth = 0.6
     mctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
     mctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
   })
@@ -539,7 +501,7 @@ export function renderGroupMapImage(mapData, items) {
     mctx.fillText(String(i + 1), cx, cy + 4)
   })
 
-  return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), outW, outH, rowLabels }
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), outW, outH }
 }
 
 // Downscale + re-encode an image file straight away. Raw phone photos can be
