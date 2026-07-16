@@ -285,12 +285,22 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     y: t.y * transform.scale + transform.ty,
     text: t.text,
   }))
-  // HUOM: aiemmin tässä oli päällekkäisyyssuoja joka piilotti osan
-  // rivinumeroista kun ne olivat lähellä toisiaan ruudulla (esim. joka
-  // toinen numero näkymättömiin GPS-lähizoomissa). Käyttäjä halusi
-  // kaikkien numeroiden näkyvän aina, samaan tapaan kuin vanhassa
-  // versiossa — joten kaikki rivinumerot näytetään nyt suoraan.
-  const visibleRowLabelDots = rowLabelDots
+  // Päällekkäisyyssuoja — kun kaukaa zoomatessa satoja kiinteän kokoisia
+  // lappuja ajautuu lähelle toisiaan, ne muuttuvat luettavan numeron
+  // sijaan tiheäksi "kohinakuvioksi". Koska sijainnit ovat jo tässä
+  // vaiheessa LOPULLISIA ruutupikseleitä, päällekkäisyys voidaan
+  // tarkistaa suoraan ja luotettavasti: piilotetaan vain ne yksittäiset
+  // laput jotka oikeasti osuisivat kiinni jo näytettäväksi valittuun
+  // naapuriinsa — rivit joilla on tilaa näkyvät aina normaalisti.
+  const visibleRowLabelDots = (() => {
+    const sorted = [...rowLabelDots].sort((a, b) => (a.y - b.y) || (a.x - b.x))
+    const kept = []
+    for (const d of sorted) {
+      const overlaps = kept.some(k => Math.abs(d.x - k.x) < 26 && Math.abs(d.y - k.y) < 16)
+      if (!overlaps) kept.push(d)
+    }
+    return kept
+  })()
   const strokeW = Math.max(0.3, 1 / transform.scale)
 
   return (
@@ -414,8 +424,8 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
               transform: 'translate(-50%,-50%)',
               background: 'rgba(255,255,255,0.85)',
               color: '#0d1a6e',
-              fontFamily: 'sans-serif', fontWeight: 700, fontSize: 9,
-              padding: '0px 3px', borderRadius: 2,
+              fontFamily: 'sans-serif', fontWeight: 700, fontSize: 12,
+              padding: '1px 4px', borderRadius: 3,
               pointerEvents: 'none', whiteSpace: 'nowrap',
               lineHeight: 1.3,
             }}
@@ -471,7 +481,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
           }} />
         )}
 
-                {/* Zoom buttons */}
+        {/* Zoom buttons */}
         <div style={{ position: 'absolute', bottom: 8, right: 8, display: 'flex', flexDirection: 'column', gap: 4, zIndex: 10 }}>
           <button onClick={(e) => { e.stopPropagation(); zoom(1.5) }} style={zoomBtnStyle}>+</button>
           <button onClick={(e) => { e.stopPropagation(); zoom(0.67) }} style={zoomBtnStyle}>−</button>
@@ -498,5 +508,3 @@ const zoomBtnStyle = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
   color: '#333'
 }
-
-
