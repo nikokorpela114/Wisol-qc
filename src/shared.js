@@ -265,6 +265,15 @@ export function findPinRow(mapData, pin) {
   let best = Infinity, label = null
   mapData.rowNumbers.forEach(t => {
     if (Math.abs(t.y - targetY) > labelYTol) return // eri Y-kaista → ei voi olla saman rivin numero
+    // HUOM: pelkkä Y-kaista ei riitä silloin kun kaksi ITSENÄISESTI
+    // numeroitua nimettyä aluetta (esim. "Keski-suora" ja "Logistiikka",
+    // ks. Aluejako-layer) kohtaavat lähes samassa pisteessä — näiden
+    // numerolaput voivat olla geometrisesti hyvin lähellä toisiaan vaikka
+    // kuuluvat eri riviin/alueeseen. Sama crossesBoundary-tarkistus jota
+    // jo käytetään INSERT-lohkojen ketjutuksessa estämään rivin
+    // muodostuminen yli aluerajan, käytetään nyt myös tässä: numerolappu
+    // hylätään jos sen ja rivin kohdepisteen välissä kulkee Aluejako-raja.
+    if (crossesBoundary(targetX, t.x)) return
     const d = Math.hypot(t.x - targetX, t.y - targetY)
     if (d < best) { best = d; label = t.text }
   })
