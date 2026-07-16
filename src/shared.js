@@ -160,6 +160,15 @@ export function findPinRow(mapData, pin) {
     for (let i = 0; i < pitchYs.length - 1; i++) gaps.push(pitchYs[i] - pitchYs[i + 1])
     gaps.sort((a, b) => a - b)
     localPitch = gaps[Math.floor(gaps.length / 2)] // mediaani
+    // HUOM: jos lähellä (th*8-ikkunan sisällä) on sattumalta vain muutama
+    // numerolappu — esim. tien reunalla tai harvaan numeroidulla alueella
+    // — mediaani voi osua kahden KAUKAISEN, harvinaisen rivin välisen raon
+    // kohdalle todellisen tiheän rivivälin sijaan (havaittu: 603 yksikköä
+    // kun todellinen on ~15). Tämä paisutti labelYTol:in niin isoksi että
+    // haku hyväksyi täysin väärän, kaukaisen rivin numeron. Rivinväli ei voi
+    // koskaan olla montaa kertaa suurempi kuin pöydän oma syvyys (th) —
+    // jos mitattu arvo on epäuskottava, ei luoteta siihen.
+    if (localPitch > th * 3 || localPitch < th * 0.3) localPitch = th
   }
 
   // 2. Kerää looginen rivi = lohkot samalla Y-korkeudella JA X-suunnassa
