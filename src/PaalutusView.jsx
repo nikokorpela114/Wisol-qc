@@ -39,6 +39,46 @@ function typeLabel(code) {
   return PILE_TYPES.find(t => t.code === code)?.label || code || ''
 }
 
+// Pieni suhteellinen kartta rivin paaluista — pohjoinen ylöspäin (maailman
+// Y kasvaa pohjoiseen), säilyttää oikean kuvasuhteen (rivi on yleensä pitkä
+// ja kapea). Paalu numeroitu samalla numerolla kuin listassa alla, väritetty
+// tilan mukaan, ja tapista voi avata saman muokkauksen kuin listasta.
+function RowMiniMap({ piles, editingId, onSelect }) {
+  if (!piles || piles.length === 0) return null
+  const xs = piles.map(p => p.x), ys = piles.map(p => p.y)
+  const minX = Math.min(...xs), maxX = Math.max(...xs)
+  const minY = Math.min(...ys), maxY = Math.max(...ys)
+  const spanX = Math.max(maxX - minX, 1)
+  const spanY = Math.max(maxY - minY, 1)
+
+  const boxW = 320, boxH = 200, pad = 24
+  const availW = boxW - pad * 2, availH = boxH - pad * 2
+  const scale = Math.min(availW / spanX, availH / spanY)
+  const drawW = spanX * scale, drawH = spanY * scale
+  const offX = pad + (availW - drawW) / 2
+  const offY = pad + (availH - drawH) / 2
+
+  const tx = x => offX + (x - minX) * scale
+  const ty = y => offY + (drawH - (y - minY) * scale) // pohjoinen (suurempi Y) ylöspäin
+
+  return (
+    <svg viewBox={`0 0 ${boxW} ${boxH}`} style={{ width: '100%', background: '#eef4ec', borderRadius: 8, marginBottom: 12 }}>
+      <text x={boxW - 8} y={16} textAnchor="end" fontSize="11" fill="#666">N ↑</text>
+      {piles.map((p, idx) => {
+        const isEditing = editingId === p.id
+        const color = p.status === 'done' ? '#1a7a45' : '#999'
+        return (
+          <g key={p.id} onClick={() => onSelect(p)} style={{ cursor: 'pointer' }}>
+            {isEditing && <circle cx={tx(p.x)} cy={ty(p.y)} r={10} fill="none" stroke="#1a2fcc" strokeWidth={2} />}
+            <circle cx={tx(p.x)} cy={ty(p.y)} r={6} fill={color} stroke="#fff" strokeWidth={1.5} />
+            <text x={tx(p.x)} y={ty(p.y) - 10} textAnchor="middle" fontSize="9" fill="#333">{idx + 1}</text>
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
 export default function PaalutusView() {
   const [session, setSession] = useState(null)
   const [operators, setOperators] = useState([])
@@ -248,6 +288,7 @@ export default function PaalutusView() {
         <h2>{selectedArea} — rivi {selectedRow}</h2>
         {rowPiles == null ? <p>Ladataan...</p> : (
           <>
+            <RowMiniMap piles={rowPiles} editingId={editingId} onSelect={p => editingId === p.id ? setEditingId(null) : startEdit(p)} />
             <p style={{ color: '#666' }}>{doneCount} / {rowPiles.length} paalua merkitty</p>
             {rowPiles.map((p, idx) => (
               <div key={p.id} style={{
