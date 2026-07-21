@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { sb } from './supabaseClient.js'
 import { KNOWN_SITES } from './shared.js'
-import { typeLabel, extraLabel } from './PaalutusView.jsx'
+import { typeLabel, extraLabel, PILE_TYPES, EXTRA_ACTIONS, buildRowExportFiles } from './PaalutusView.jsx'
 
 const sevColor = { Kriittinen: '#b02828', Huomio: '#a06800', Info: '#1a7a45' }
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
@@ -36,6 +36,10 @@ export default function Dashboard() {
   const [newPileOpPin, setNewPileOpPin] = useState('')
   const [expandedRowKey, setExpandedRowKey] = useState(null)
   const [expandedRowPiles, setExpandedRowPiles] = useState(null)
+  const [editPileId, setEditPileId] = useState(null)
+  const [editPileType, setEditPileType] = useState('')
+  const [editPileExtra, setEditPileExtra] = useState('')
+  const [editPileKn, setEditPileKn] = useState('')
 
   const load = useCallback(async () => {
     const [{ data: o, error: oErr }, { data: i, error: iErr }, { data: tm, error: tErr }, { data: po, error: poErr }, { data: prs, error: prsErr }] = await Promise.all([
@@ -240,9 +244,69 @@ export default function Dashboard() {
     if (expandedRowKey === key) { setExpandedRowKey(null); setExpandedRowPiles(null); return }
     setExpandedRowKey(key)
     setExpandedRowPiles(null)
+    setEditPileId(null)
     const site = pileSiteFilter || KNOWN_SITES[0]?.key
     const { data, error } = await sb.from('piles').select('*').eq('site', site).eq('area', area).eq('row_number', rowNumber).order('id')
     setExpandedRowPiles(error ? [] : (data || []))
+  }
+
+  // Tyhjentää KOKO avoinna olevan rivin — kaikki sen paalut palautuvat
+  // merkitsemättömiksi (esim. jos paaluttaja teki virheen koko rivillä).
+  async function resetWholeRow(area, rowNumber) {
+    if (!window.confirm(`Tyhjennetäänkö KOKO rivi ${rowNumber} (${area})? Kaikki sen paalujen merkinnät poistuvat.`)) return
+    const site = pileSiteFilter || KNOWN_SITES[0]?.key
+    const { error } = await sb.from('piles').update({
+      pile_type: null, extra_action: null, pull_test_kn: null,
+      status: 'open', installed_by: null, installed_at: null
+    }).eq('site', site).eq('area', area).eq('row_number', rowNumber)
+    if (error) { alert('Tyhjennys epäonnistui: ' + error.message); return }
+    const { data: refreshed } = await sb.from('piles').select('*').eq('site', site).eq('area', area).eq('row_number', rowNumber).order('id')
+    setExpandedRowPiles(refreshed || [])
+    load()
+  }
+
+  // Yksittäisen paalun tyhjennys (palauttaa merkitsemättömäksi)
+  async function resetPile(pileId) {
+    if (!window.confirm('Tyhjennetäänkö tämän paalun merkintä?')) return
+    const { data, error } = await sb.from('piles').update({
+      pile_type: null, extra_action: null, pull_test_kn: null,
+      status: 'open', installed_by: null, installed_at: null
+    }).eq('id', pileId).select().single()
+    if (error) { alert('Tyhjennys epäonnistui: ' + error.message); return }
+    setExpandedRowPiles(prev => prev.map(p => p.id === pileId ? data : p))
+  }
+
+  // Yksittäisen paalun muokkaus (koko, lisätoimenpide, vetotesti)
+  function startEditPile(pile) {
+    setEditPileId(pile.id)
+    setEditPileType(pile.pile_type || '')
+    setEditPileExtra(pile.extra_action || '')
+    setEditPileKn(pile.pull_test_kn ?? '')
+  }
+  async function saveEditPile(pileId) {
+    const { data, error } = await sb.from('piles').update({
+      pile_type: editPileType || null,
+      extra_action: editPileExtra || null,
+      pull_test_kn: editPileKn === '' ? null : parseFloat(editPileKn),
+      status: (editPileType || editPileExtra) ? 'done' : 'open',
+    }).eq('id', pileId).select().single()
+    if (error) { alert('Tallennus epäonnistui: ' + error.message); return }
+    setExpandedRowPiles(prev => prev.map(p => p.id === pileId ? data : p))
+    setEditPileId(null)
+  }
+
+  // Lataa rivin PDF + Excel suoraan tiedostoina (työpöytäkäyttö — ei
+  // jakovalikkoa, samat tiedostot kuin paaluttajan puhelimessa)
+  async function downloadRowFiles(area, rowNumber) {
+    if (!expandedRowPiles || expandedRowPiles.length === 0) return
+    const siteLabel = KNOWN_SITES.find(s => s.key === (pileSiteFilter || KNOWN_SITES[0]?.key))?.label || pileSiteFilter
+    const { pdfBlob, xlsxBlob, baseName } = await buildRowExportFiles(expandedRowPiles, area, rowNumber, siteLabel)
+    for (const [blob, name] of [[pdfBlob, `${baseName}.pdf`], [xlsxBlob, `${baseName}.xlsx`]]) {
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = name
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 3000)
+    }
   }
 
 
@@ -564,30 +628,77 @@ export default function Dashboard() {
                         {expandedRowPiles == null ? (
                           <div style={{ fontSize: 13, color: '#9aa2c0' }}>Ladataan…</div>
                         ) : (
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                            <thead>
-                              <tr>
-                                <th style={thStyle}>#</th>
-                                <th style={thStyle}>Koko</th>
-                                <th style={thStyle}>Lisätoimenpide</th>
-                                <th style={thStyle}>Vetotesti kN</th>
-                                <th style={thStyle}>Asentaja</th>
-                                <th style={thStyle}>Tila</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {expandedRowPiles.map((p, idx) => (
-                                <tr key={p.id}>
-                                  <td style={tdStyle}>{idx + 1}</td>
-                                  <td style={tdStyle}>{typeLabel(p.pile_type) || '–'}</td>
-                                  <td style={tdStyle}>{extraLabel(p.extra_action) || '–'}</td>
-                                  <td style={tdStyle}>{p.pull_test_kn ?? '–'}</td>
-                                  <td style={tdStyle}>{p.installed_by || '–'}</td>
-                                  <td style={tdStyle}>{p.status === 'done' ? '✅' : '—'}</td>
+                          <>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 8 }}>
+                              <button
+                                onClick={() => downloadRowFiles(area, Number(expandedRowKey.split('__')[1]))}
+                                style={{ background: 'none', border: '1px solid #b8c0e8', color: '#1a2fcc', borderRadius: 6, padding: '5px 10px', fontSize: 12, cursor: 'pointer' }}
+                              >
+                                ⬇️ Lataa PDF + Excel
+                              </button>
+                              <button
+                                onClick={() => resetWholeRow(area, Number(expandedRowKey.split('__')[1]))}
+                                style={{ background: 'none', border: '1px solid #e0b0b0', color: '#b02828', borderRadius: 6, padding: '5px 10px', fontSize: 12, cursor: 'pointer' }}
+                              >
+                                🗑️ Tyhjennä koko rivi
+                              </button>
+                            </div>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                              <thead>
+                                <tr>
+                                  <th style={thStyle}>#</th>
+                                  <th style={thStyle}>Koko</th>
+                                  <th style={thStyle}>Lisätoimenpide</th>
+                                  <th style={thStyle}>Vetotesti kN</th>
+                                  <th style={thStyle}>Asentaja</th>
+                                  <th style={thStyle}>Tila</th>
+                                  <th style={thStyle}></th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                              </thead>
+                              <tbody>
+                                {expandedRowPiles.map((p, idx) => (
+                                  editPileId === p.id ? (
+                                    <tr key={p.id} style={{ background: '#eef1ff' }}>
+                                      <td style={tdStyle}>{idx + 1}</td>
+                                      <td style={tdStyle}>
+                                        <select value={editPileType} onChange={e => setEditPileType(e.target.value)} style={{ ...selectStyle, padding: '4px 8px', fontSize: 12.5 }}>
+                                          <option value="">–</option>
+                                          {PILE_TYPES.map(t => <option key={t.code} value={t.code}>{t.label}</option>)}
+                                        </select>
+                                      </td>
+                                      <td style={tdStyle}>
+                                        <select value={editPileExtra} onChange={e => setEditPileExtra(e.target.value)} style={{ ...selectStyle, padding: '4px 8px', fontSize: 12.5 }}>
+                                          {EXTRA_ACTIONS.map(a => <option key={a.code} value={a.code}>{a.label}</option>)}
+                                        </select>
+                                      </td>
+                                      <td style={tdStyle}>
+                                        <input type="number" value={editPileKn} onChange={e => setEditPileKn(e.target.value)} style={{ ...selectStyle, padding: '4px 8px', fontSize: 12.5, width: 70 }} />
+                                      </td>
+                                      <td style={tdStyle}>{p.installed_by || '–'}</td>
+                                      <td style={tdStyle}>{p.status === 'done' ? '✅' : '—'}</td>
+                                      <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
+                                        <button onClick={() => saveEditPile(p.id)} style={{ background: '#1a7a45', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer', marginRight: 4 }}>✓</button>
+                                        <button onClick={() => setEditPileId(null)} style={{ background: '#fff', border: '1px solid #ccc', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>✕</button>
+                                      </td>
+                                    </tr>
+                                  ) : (
+                                    <tr key={p.id}>
+                                      <td style={tdStyle}>{idx + 1}</td>
+                                      <td style={tdStyle}>{typeLabel(p.pile_type) || '–'}</td>
+                                      <td style={tdStyle}>{extraLabel(p.extra_action) || '–'}</td>
+                                      <td style={tdStyle}>{p.pull_test_kn ?? '–'}</td>
+                                      <td style={tdStyle}>{p.installed_by || '–'}</td>
+                                      <td style={tdStyle}>{p.status === 'done' ? '✅' : '—'}</td>
+                                      <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
+                                        <button onClick={() => startEditPile(p)} title="Muokkaa" style={{ background: 'none', border: 'none', color: '#1a2fcc', fontSize: 13, cursor: 'pointer', padding: '2px 6px' }}>✏️</button>
+                                        <button onClick={() => resetPile(p.id)} title="Tyhjennä" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 13, cursor: 'pointer', padding: '2px 6px' }}>🗑️</button>
+                                      </td>
+                                    </tr>
+                                  )
+                                ))}
+                              </tbody>
+                            </table>
+                          </>
                         )}
                       </div>
                     )}

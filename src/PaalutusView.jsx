@@ -115,7 +115,106 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
       </svg>
     </div>
   )
-}export default function PaalutusView() {
+}
+
+// Rakentaa rivin PDF- ja Excel-tiedostot (blobit) — jaettu funktio jota
+// käyttävät sekä paaluttajan vientinappi (jakaa puhelimen jakovalikolla)
+// että valvomon latausnappi (suora lataus, ei jakovalikkoa työpöydällä).
+export async function buildRowExportFiles(rowPiles, areaLabel, rowNumber, siteLabel) {
+  const rowLabel = `${areaLabel} rivi ${rowNumber}`
+  const dateStr = new Date().toLocaleDateString('fi-FI')
+  const baseName = `${siteLabel} - ${rowLabel} - ${dateStr}`.replace(/\s+/g, '_')
+
+  // Excel (.xlsx) — vetotestatut paalut punaisella solutaustalla
+  const ExcelJS = await import('exceljs')
+  const wb = new ExcelJS.Workbook()
+  const ws = wb.addWorksheet(rowLabel.slice(0, 31))
+  ws.columns = [
+    { header: 'Paalu #', key: 'idx', width: 8 },
+    { header: 'Paalukoko', key: 'type', width: 18 },
+    { header: 'Lisätoimenpide', key: 'extra', width: 30 },
+    { header: 'Vetotesti (kN)', key: 'kn', width: 14 },
+    { header: 'Asentaja', key: 'by', width: 16 },
+    { header: 'Aika', key: 'at', width: 18 },
+  ]
+  ws.getRow(1).font = { bold: true }
+  const redFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7D6D6' } }
+  rowPiles.forEach((p, idx) => {
+    const row = ws.addRow({
+      idx: idx + 1,
+      type: typeLabel(p.pile_type),
+      extra: extraLabel(p.extra_action),
+      kn: p.pull_test_kn ?? '',
+      by: p.installed_by || '',
+      at: p.installed_at ? new Date(p.installed_at).toLocaleString('fi-FI') : '',
+    })
+    if (p.pull_test_kn != null) row.eachCell(c => { c.fill = redFill })
+  })
+  const xlsxBuffer = await wb.xlsx.writeBuffer()
+  const xlsxBlob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+
+  // PDF — vetotestatut paalut punaisella tekstillä
+  const { jsPDF } = await import('jspdf')
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+  doc.setFontSize(14)
+  doc.text(`${siteLabel} — ${rowLabel}`, 14, 16)
+  doc.setFontSize(10)
+  doc.text(`Pvm: ${dateStr}`, 14, 23)
+
+  // Karttakuva (vektorina, samassa hengessä kuin puhelimen rivikartta) —
+  // sovitetaan laatikkoon (ei vieritystä paperilla), säilyttää oikean
+  // kuvasuhteen. Punainen rengas = vetotesti tehty.
+  let y = 30
+  const mapX = 14, mapW = 182, mapH = 55
+  doc.setDrawColor(200, 205, 220)
+  doc.setFillColor(238, 244, 236)
+  doc.rect(mapX, y, mapW, mapH, 'FD')
+  const mxs = rowPiles.map(p => p.x), mys = rowPiles.map(p => p.y)
+  const mMinX = Math.min(...mxs), mMaxX = Math.max(...mxs)
+  const mMinY = Math.min(...mys), mMaxY = Math.max(...mys)
+  const mSpanX = Math.max(mMaxX - mMinX, 1), mSpanY = Math.max(mMaxY - mMinY, 1)
+  const mPad = 4
+  const mScale = Math.min((mapW - mPad * 2) / mSpanX, (mapH - mPad * 2) / mSpanY)
+  const mDrawW = mSpanX * mScale, mDrawH = mSpanY * mScale
+  const mOffX = mapX + mPad + (mapW - mPad * 2 - mDrawW) / 2
+  const mOffY = y + mPad + (mapH - mPad * 2 - mDrawH) / 2
+  const mtx = px => mOffX + (px - mMinX) * mScale
+  const mty = py => mOffY + (mDrawH - (py - mMinY) * mScale) // pohjoinen ylös
+  doc.setFontSize(7); doc.setTextColor(120, 120, 120)
+  doc.text('N ↑', mapX + mapW - 3, y + 5, { align: 'right' })
+  rowPiles.forEach(p => {
+    const cx = mtx(p.x), cy = mty(p.y)
+    if (p.status === 'done') doc.setFillColor(26, 122, 69); else doc.setFillColor(153, 153, 153)
+    doc.circle(cx, cy, 0.7, 'F')
+    if (p.pull_test_kn != null) { doc.setDrawColor(214, 48, 48); doc.setLineWidth(0.25); doc.circle(cx, cy, 1.2, 'S') }
+  })
+  doc.setLineWidth(0.2)
+  y += mapH + 8
+
+  doc.setFontSize(9)
+  doc.setTextColor(0, 0, 0)
+  doc.text('#', 14, y); doc.text('Koko', 24, y); doc.text('Lisätoimenpide', 50, y)
+  doc.text('Vetotesti kN', 110, y); doc.text('Asentaja', 140, y)
+  y += 5
+  doc.line(14, y - 3, 196, y - 3)
+  rowPiles.forEach((p, idx) => {
+    if (y > 280) { doc.addPage(); y = 16 }
+    const hasPullTest = p.pull_test_kn != null
+    doc.setTextColor(hasPullTest ? 214 : 0, hasPullTest ? 48 : 0, hasPullTest ? 48 : 0)
+    doc.text(String(idx + 1), 14, y)
+    doc.text(typeLabel(p.pile_type) || '-', 24, y)
+    doc.text(extraLabel(p.extra_action) || '-', 50, y, { maxWidth: 58 })
+    doc.text(p.pull_test_kn != null ? String(p.pull_test_kn) : '-', 110, y)
+    doc.text(p.installed_by || '-', 140, y)
+    y += 6
+  })
+  doc.setTextColor(0, 0, 0)
+  const pdfBlob = doc.output('blob')
+
+  return { pdfBlob, xlsxBlob, baseName, rowLabel }
+}
+
+export default function PaalutusView() {
   const [session, setSession] = useState(null)
   const [operators, setOperators] = useState([])
   const [selectedId, setSelectedId] = useState('')
@@ -296,66 +395,8 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
   async function exportRow() {
     if (!rowPiles || rowPiles.length === 0) return
     setExportMsg('Luodaan tiedostoja...')
-    const rowLabel = `${selectedArea} rivi ${selectedRow}`
     const siteLabel = KNOWN_SITES.find(s => s.key === siteKey)?.label || siteKey
-    const dateStr = new Date().toLocaleDateString('fi-FI')
-    const baseName = `${siteLabel} - ${rowLabel} - ${dateStr}`.replace(/\s+/g, '_')
-
-    // Excel (.xlsx) — vetotestatut paalut punaisella solutaustalla
-    const ExcelJS = await import('exceljs')
-    const wb = new ExcelJS.Workbook()
-    const ws = wb.addWorksheet(rowLabel.slice(0, 31))
-    ws.columns = [
-      { header: 'Paalu #', key: 'idx', width: 8 },
-      { header: 'Paalukoko', key: 'type', width: 18 },
-      { header: 'Lisätoimenpide', key: 'extra', width: 30 },
-      { header: 'Vetotesti (kN)', key: 'kn', width: 14 },
-      { header: 'Asentaja', key: 'by', width: 16 },
-      { header: 'Aika', key: 'at', width: 18 },
-    ]
-    ws.getRow(1).font = { bold: true }
-    const redFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7D6D6' } }
-    rowPiles.forEach((p, idx) => {
-      const row = ws.addRow({
-        idx: idx + 1,
-        type: typeLabel(p.pile_type),
-        extra: extraLabel(p.extra_action),
-        kn: p.pull_test_kn ?? '',
-        by: p.installed_by || '',
-        at: p.installed_at ? new Date(p.installed_at).toLocaleString('fi-FI') : '',
-      })
-      if (p.pull_test_kn != null) row.eachCell(c => { c.fill = redFill })
-    })
-    const xlsxBuffer = await wb.xlsx.writeBuffer()
-    const xlsxBlob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-
-    // PDF — vetotestatut paalut punaisella tekstillä
-    const { jsPDF } = await import('jspdf')
-    const doc = new jsPDF({ unit: 'mm', format: 'a4' })
-    doc.setFontSize(14)
-    doc.text(`${siteLabel} — ${rowLabel}`, 14, 16)
-    doc.setFontSize(10)
-    doc.text(`Pvm: ${dateStr}`, 14, 23)
-    let y = 32
-    doc.setFontSize(9)
-    doc.setTextColor(0, 0, 0)
-    doc.text('#', 14, y); doc.text('Koko', 24, y); doc.text('Lisätoimenpide', 50, y)
-    doc.text('Vetotesti kN', 110, y); doc.text('Asentaja', 140, y)
-    y += 5
-    doc.line(14, y - 3, 196, y - 3)
-    rowPiles.forEach((p, idx) => {
-      if (y > 280) { doc.addPage(); y = 16 }
-      const hasPullTest = p.pull_test_kn != null
-      doc.setTextColor(hasPullTest ? 214 : 0, hasPullTest ? 48 : 0, hasPullTest ? 48 : 0)
-      doc.text(String(idx + 1), 14, y)
-      doc.text(typeLabel(p.pile_type) || '-', 24, y)
-      doc.text(extraLabel(p.extra_action) || '-', 50, y, { maxWidth: 58 })
-      doc.text(p.pull_test_kn != null ? String(p.pull_test_kn) : '-', 110, y)
-      doc.text(p.installed_by || '-', 140, y)
-      y += 6
-    })
-    doc.setTextColor(0, 0, 0)
-    const pdfBlob = doc.output('blob')
+    const { pdfBlob, xlsxBlob, baseName, rowLabel } = await buildRowExportFiles(rowPiles, selectedArea, selectedRow, siteLabel)
 
     // Jaa puhelimen omalla jakovalikolla (sama tapa kuin valvomon PDF-jaossa
     // App.jsx:ssä) — huomattavasti nopeampi ja luotettavampi kuin lataus-
