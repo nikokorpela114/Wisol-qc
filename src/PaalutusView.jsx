@@ -176,7 +176,18 @@ export default function PaalutusView() {
     setRowPiles(null)
     setEditingId(null)
     sb.from('piles').select('*').eq('site', siteKey).eq('area', selectedArea).eq('row_number', rowNumber).order('id')
-      .then(({ data, error }) => setRowPiles(error ? [] : (data || [])))
+      .then(({ data, error }) => {
+        if (error || !data) { setRowPiles([]); return }
+        // HUOM: tietokannan järjestys on DXF:n piirtojärjestys, EI fyysinen
+        // sijainti — ilman tätä "Paalu #3" ja "Paalu #67" voisivat olla
+        // vierekkäin kartalla, mikä on hämmentävää. Järjestetään rivin
+        // pidemmän suunnan mukaan (yleensä länsi-itä, joskus pohjois-etelä).
+        const xs = data.map(p => p.x), ys = data.map(p => p.y)
+        const spanX = Math.max(...xs) - Math.min(...xs)
+        const spanY = Math.max(...ys) - Math.min(...ys)
+        const sorted = [...data].sort((a, b) => spanX >= spanY ? (a.x - b.x) : (b.y - a.y))
+        setRowPiles(sorted)
+      })
   }
 
   function closeRow() {
