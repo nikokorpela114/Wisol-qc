@@ -271,6 +271,7 @@ export default function PaalutusView() {
     const rowLabel = `${selectedArea} rivi ${selectedRow}`
     const siteLabel = KNOWN_SITES.find(s => s.key === siteKey)?.label || siteKey
     const dateStr = new Date().toLocaleDateString('fi-FI')
+    const baseName = `${siteLabel} - ${rowLabel} - ${dateStr}`.replace(/\s+/g, '_')
 
     // CSV (avautuu suoraan Exceliin)
     const csvHeader = 'Paalu #;Paalukoko;Lisätoimenpide;Vetotesti (kN);Asentaja;Aika\n'
@@ -279,12 +280,6 @@ export default function PaalutusView() {
         .map(v => String(v).replace(/;/g, ',')).join(';')
     ).join('\n')
     const csvBlob = new Blob(['\uFEFF' + csvHeader + csvRows], { type: 'text/csv;charset=utf-8' })
-    const csvUrl = URL.createObjectURL(csvBlob)
-    const csvLink = document.createElement('a')
-    csvLink.href = csvUrl
-    csvLink.download = `${siteLabel} - ${rowLabel} - ${dateStr}.csv`
-    csvLink.click()
-    URL.revokeObjectURL(csvUrl)
 
     // PDF
     const { jsPDF } = await import('jspdf')
@@ -308,9 +303,31 @@ export default function PaalutusView() {
       doc.text(p.installed_by || '-', 140, y)
       y += 6
     })
-    doc.save(`${siteLabel} - ${rowLabel} - ${dateStr}.pdf`)
+    const pdfBlob = doc.output('blob')
 
-    setExportMsg('✅ PDF ja CSV ladattu — lähetä ne työnjohdolle esim. sähköpostilla tai WhatsAppilla.')
+    // Jaa puhelimen omalla jakovalikolla (sama tapa kuin valvomon PDF-jaossa
+    // App.jsx:ssä) — huomattavasti nopeampi ja luotettavampi kuin lataus-
+    // linkit, erityisesti iOS Safarissa jossa <a download> toimii huonosti.
+    const pdfFile = new File([pdfBlob], `${baseName}.pdf`, { type: 'application/pdf' })
+    const csvFile = new File([csvBlob], `${baseName}.csv`, { type: 'text/csv' })
+
+    if (navigator.canShare?.({ files: [pdfFile, csvFile] })) {
+      try {
+        await navigator.share({ files: [pdfFile, csvFile], title: rowLabel })
+        setExportMsg('✅ Lähetetty.')
+      } catch {
+        setExportMsg('')
+      }
+    } else {
+      // Varalla, jos jakotoiminto ei ole tuettu: lataus
+      for (const [blob, name] of [[pdfBlob, `${baseName}.pdf`], [csvBlob, `${baseName}.csv`]]) {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a'); a.href = url; a.download = name
+        document.body.appendChild(a); a.click(); document.body.removeChild(a)
+        setTimeout(() => URL.revokeObjectURL(url), 3000)
+      }
+      setExportMsg('✅ PDF ja CSV ladattu — lähetä ne työnjohdolle esim. sähköpostilla tai WhatsAppilla.')
+    }
   }
 
   // --- Kirjautumisnäkymä ---
@@ -348,7 +365,9 @@ export default function PaalutusView() {
         <h2>{selectedArea} — rivi {selectedRow}</h2>
         {rowPiles == null ? <p>Ladataan...</p> : (
           <>
-            <RowMiniMap piles={rowPiles} editingId={editingId} onSelect={p => editingId === p.id ? setEditingId(null) : startEdit(p)} myLocation={myLocation} />
+            <div style={{ position: 'sticky', top: 0, zIndex: 5, background: '#f7f8fb', paddingTop: 4, paddingBottom: 4 }}>
+              <RowMiniMap piles={rowPiles} editingId={editingId} onSelect={p => editingId === p.id ? setEditingId(null) : startEdit(p)} myLocation={myLocation} />
+            </div>
             <p style={{ color: '#666' }}>{doneCount} / {rowPiles.length} paalua merkitty</p>
             {rowPiles.map((p, idx) => (
               <div key={p.id} style={{
