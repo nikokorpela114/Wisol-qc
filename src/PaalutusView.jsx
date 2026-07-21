@@ -51,31 +51,46 @@ function RowMiniMap({ piles, editingId, onSelect }) {
   const spanX = Math.max(maxX - minX, 1)
   const spanY = Math.max(maxY - minY, 1)
 
-  const boxW = 320, boxH = 200, pad = 24
-  const availW = boxW - pad * 2, availH = boxH - pad * 2
-  const scale = Math.min(availW / spanX, availH / spanY)
-  const drawW = spanX * scale, drawH = spanY * scale
-  const offX = pad + (availW - drawW) / 2
-  const offY = pad + (availH - drawH) / 2
+  // Todenmukainen mittakaava (px/metri) — EI venytetä täyttämään laatikkoa,
+  // koska rivi on hyvin pitkä (esim. 100 m) ja kapea (n. 2-3 m): täyttöön
+  // venytetty kuva menisi aina paalut päällekkäin. Sen sijaan piirretään
+  // oikeassa suhteessa ja annetaan leveän rivin vierittyä sivusuunnassa.
+  const PX_PER_M = 14
+  const pad = 24
+  const boxH = 140
+  const drawW = spanX * PX_PER_M
+  const drawH = spanY * PX_PER_M
+  const boxW = Math.max(320, drawW + pad * 2)
+  const offX = pad
+  const offY = pad + Math.max(0, (boxH - pad * 2 - drawH) / 2)
 
-  const tx = x => offX + (x - minX) * scale
-  const ty = y => offY + (drawH - (y - minY) * scale) // pohjoinen (suurempi Y) ylöspäin
+  const tx = x => offX + (x - minX) * PX_PER_M
+  const ty = y => offY + (drawH - (y - minY) * PX_PER_M) // pohjoinen (suurempi Y) ylöspäin
+
+  const editingPile = piles.find(p => p.id === editingId)
+  const editingIdx = editingPile ? piles.indexOf(editingPile) : -1
 
   return (
-    <svg viewBox={`0 0 ${boxW} ${boxH}`} style={{ width: '100%', background: '#eef4ec', borderRadius: 8, marginBottom: 12 }}>
-      <text x={boxW - 8} y={16} textAnchor="end" fontSize="11" fill="#666">N ↑</text>
-      {piles.map((p, idx) => {
-        const isEditing = editingId === p.id
-        const color = p.status === 'done' ? '#1a7a45' : '#999'
-        return (
-          <g key={p.id} onClick={() => onSelect(p)} style={{ cursor: 'pointer' }}>
-            {isEditing && <circle cx={tx(p.x)} cy={ty(p.y)} r={10} fill="none" stroke="#1a2fcc" strokeWidth={2} />}
-            <circle cx={tx(p.x)} cy={ty(p.y)} r={6} fill={color} stroke="#fff" strokeWidth={1.5} />
-            <text x={tx(p.x)} y={ty(p.y) - 10} textAnchor="middle" fontSize="9" fill="#333">{idx + 1}</text>
-          </g>
-        )
-      })}
-    </svg>
+    <div style={{ overflowX: 'auto', marginBottom: 12, borderRadius: 8, background: '#eef4ec' }}>
+      <svg viewBox={`0 0 ${boxW} ${boxH}`} width={boxW} height={boxH} style={{ display: 'block' }}>
+        <text x={boxW - 8} y={16} textAnchor="end" fontSize="11" fill="#666">N ↑</text>
+        {piles.map((p, idx) => {
+          const isEditing = editingId === p.id
+          const color = p.status === 'done' ? '#1a7a45' : '#999'
+          return (
+            <g key={p.id} onClick={() => onSelect(p)} style={{ cursor: 'pointer' }}>
+              {isEditing && <circle cx={tx(p.x)} cy={ty(p.y)} r={9} fill="none" stroke="#1a2fcc" strokeWidth={2} />}
+              <circle cx={tx(p.x)} cy={ty(p.y)} r={5} fill={color} stroke="#fff" strokeWidth={1} />
+            </g>
+          )
+        })}
+        {editingIdx >= 0 && (
+          <text x={tx(editingPile.x)} y={ty(editingPile.y) - 13} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#1a2fcc">
+            #{editingIdx + 1}
+          </text>
+        )}
+      </svg>
+    </div>
   )
 }
 
