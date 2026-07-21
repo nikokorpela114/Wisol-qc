@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { sb } from './supabaseClient.js'
 import { KNOWN_SITES } from './shared.js'
+import { typeLabel, extraLabel } from './PaalutusView.jsx'
 
 const sevColor = { Kriittinen: '#b02828', Huomio: '#a06800', Info: '#1a7a45' }
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
@@ -27,18 +28,33 @@ export default function Dashboard() {
   const [newInstallerPin, setNewInstallerPin] = useState('')
   const [lightboxSrc, setLightboxSrc] = useState(null) // korjauskuvan suurennettu näkymä
 
+  // --- Paalutus-välilehden tila ---
+  const [pileOperators, setPileOperators] = useState([])
+  const [pileRowSummary, setPileRowSummary] = useState([])
+  const [pileSiteFilter, setPileSiteFilter] = useState('')
+  const [newPileOpName, setNewPileOpName] = useState('')
+  const [newPileOpPin, setNewPileOpPin] = useState('')
+  const [expandedRowKey, setExpandedRowKey] = useState(null)
+  const [expandedRowPiles, setExpandedRowPiles] = useState(null)
+
   const load = useCallback(async () => {
-    const [{ data: o, error: oErr }, { data: i, error: iErr }, { data: tm, error: tErr }] = await Promise.all([
+    const [{ data: o, error: oErr }, { data: i, error: iErr }, { data: tm, error: tErr }, { data: po, error: poErr }, { data: prs, error: prsErr }] = await Promise.all([
       sb.from('observations').select('*').order('created_at', { ascending: false }).limit(3000),
       sb.from('installers').select('*').order('name'),
       sb.from('teams').select('*').order('name'),
+      sb.from('pile_operators').select('*').order('name'),
+      sb.from('pile_rows_summary').select('*').order('area').order('row_number'),
     ])
     if (oErr) console.error('Dashboard: observations fetch failed', oErr)
     if (iErr) console.error('Dashboard: installers fetch failed', iErr)
     if (tErr) console.error('Dashboard: teams fetch failed', tErr)
+    if (poErr) console.error('Dashboard: pile_operators fetch failed', poErr)
+    if (prsErr) console.error('Dashboard: pile_rows_summary fetch failed', prsErr)
     setObs(o || [])
     setInstallers(i || [])
     setTeams(tm || [])
+    setPileOperators(po || [])
+    setPileRowSummary(prs || [])
     setLoading(false)
     setLastRefresh(new Date())
   }, [])
@@ -201,6 +217,35 @@ export default function Dashboard() {
     load()
   }
 
+  // --- Paalutus: paaluttajien hallinta ---
+  async function addPileOperator() {
+    const name = newPileOpName.trim(), pinVal = newPileOpPin.trim()
+    if (!name || pinVal.length < 4) { alert('Anna nimi ja vähintään 4-numeroinen PIN.'); return }
+    const { data, error } = await sb.from('pile_operators').insert([{ name, pin: pinVal }]).select()
+    if (error) { alert('Lisäys epäonnistui: ' + error.message); return }
+    if (!data || data.length === 0) { alert('Lisäys ei tallentunut — tarkista RLS-oikeudet pile_operators-taululle.'); return }
+    setNewPileOpName(''); setNewPileOpPin('')
+    load()
+  }
+  async function deletePileOperator(op) {
+    if (!window.confirm(`Poistetaanko paaluttaja ${op.name}?`)) return
+    const { error } = await sb.from('pile_operators').delete().eq('id', op.id)
+    if (error) { alert('Poisto epäonnistui: ' + error.message); return }
+    load()
+  }
+
+  // --- Paalutus: rivin laajennus (näyttää saman sisällön kuin "Rivi valmis" -vienti) ---
+  async function toggleRowExpand(area, rowNumber) {
+    const key = `${area}__${rowNumber}`
+    if (expandedRowKey === key) { setExpandedRowKey(null); setExpandedRowPiles(null); return }
+    setExpandedRowKey(key)
+    setExpandedRowPiles(null)
+    const site = pileSiteFilter || KNOWN_SITES[0]?.key
+    const { data, error } = await sb.from('piles').select('*').eq('site', site).eq('area', area).eq('row_number', rowNumber).order('id')
+    setExpandedRowPiles(error ? [] : (data || []))
+  }
+
+
   return (
     <div style={{ minHeight: '100vh', background: '#f6f7fb', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       <div style={{ background: 'linear-gradient(135deg, #1a2fcc, #2438e8)', padding: '20px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, boxShadow: '0 2px 12px rgba(26,47,204,0.18)' }}>
@@ -246,11 +291,12 @@ export default function Dashboard() {
             <TabButton active={tab === 'fixed'} onClick={() => { setTab('fixed'); clearSelection() }}>Korjatut ({fixedObs.length})</TabButton>
             <TabButton active={tab === 'hidden'} onClick={() => { setTab('hidden'); clearSelection() }}>Piilotetut ({hiddenObs.length})</TabButton>
             <TabButton active={tab === 'teams'} onClick={() => { setTab('teams'); clearSelection() }}>Tiimit</TabButton>
+            <TabButton active={tab === 'piling'} onClick={() => { setTab('piling'); clearSelection() }}>Paalutus</TabButton>
           </div>
         </div>
 
         {/* Massatoimintopalkki */}
-        {selected.size > 0 && tab !== 'teams' && (
+        {selected.size > 0 && tab !== 'teams' && tab !== 'piling' && (
           <div style={{ position: 'sticky', top: 12, zIndex: 10, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 12, padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 4px 16px rgba(20,30,80,0.10)' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: '#0d1a6e' }}>{selected.size} valittu</span>
             <div style={{ flex: 1 }} />
@@ -427,6 +473,127 @@ export default function Dashboard() {
                 />
                 <button onClick={addInstaller} style={{ background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 8, padding: '0 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>+</button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'piling' && (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16, marginBottom: 20 }}>
+              <div style={{ ...cardStyle, padding: 20 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e', marginBottom: 14 }}>Paaluttajat</div>
+                {pileOperators.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0', marginBottom: 10 }}>Ei paaluttajia vielä</div>}
+                {pileOperators.map(op => (
+                  <div key={op.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f5fa', gap: 10 }}>
+                    <span style={{ fontSize: 14 }}>{op.name}</span>
+                    <button onClick={() => deletePileOperator(op)} title="Poista paaluttaja" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
+                  </div>
+                ))}
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa2c0', marginTop: 18, marginBottom: 8, textTransform: 'uppercase' }}>+ Uusi paaluttaja</div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    placeholder="Nimi"
+                    value={newPileOpName}
+                    onChange={e => setNewPileOpName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && addPileOperator()}
+                    style={{ ...selectStyle, flex: 2 }}
+                  />
+                  <input
+                    placeholder="PIN"
+                    value={newPileOpPin}
+                    onChange={e => setNewPileOpPin(e.target.value.replace(/\D/g, ''))}
+                    onKeyDown={e => e.key === 'Enter' && addPileOperator()}
+                    inputMode="numeric"
+                    maxLength={6}
+                    style={{ ...selectStyle, flex: 1 }}
+                  />
+                  <button onClick={addPileOperator} style={{ background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 8, padding: '0 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>+</button>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ ...cardStyle, padding: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e' }}>Paalutuksen eteneminen</div>
+                <select value={pileSiteFilter} onChange={e => setPileSiteFilter(e.target.value)} style={selectStyle}>
+                  {KNOWN_SITES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                </select>
+              </div>
+
+              {pileRowSummary.length === 0 && <EmptyState text="Ei paalutietoja — onko tuonti (?paalutuonti) ajettu?" />}
+
+              {Object.entries(
+                pileRowSummary.reduce((acc, r) => {
+                  (acc[r.area] = acc[r.area] || []).push(r); return acc
+                }, {})
+              ).map(([area, rows]) => {
+                const totalPiles = rows.reduce((s, r) => s + r.total_piles, 0)
+                const donePiles = rows.reduce((s, r) => s + r.done_piles, 0)
+                const doneRows = rows.filter(r => r.row_complete).length
+                return (
+                  <div key={area} style={{ marginBottom: 22 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e' }}>{area}</div>
+                      <div style={{ fontSize: 12.5, color: '#6670a0' }}>{doneRows}/{rows.length} riviä · {donePiles}/{totalPiles} paalua</div>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {rows.map(r => {
+                        const key = `${area}__${r.row_number}`
+                        const isOpen = expandedRowKey === key
+                        return (
+                          <div key={key} style={{ display: 'contents' }}>
+                            <button
+                              onClick={() => toggleRowExpand(area, r.row_number)}
+                              style={{
+                                padding: '6px 12px', borderRadius: 8, fontSize: 12.5, cursor: 'pointer',
+                                border: isOpen ? '1.5px solid #1a2fcc' : '1px solid #dfe2f0',
+                                background: r.row_complete ? '#dcefe3' : '#f6f7fb',
+                                color: r.row_complete ? '#1a7a50' : '#333',
+                                fontWeight: isOpen ? 700 : 500,
+                              }}
+                            >
+                              Rivi {r.row_number} · {r.done_piles}/{r.total_piles}{r.row_complete ? ' ✅' : ''}
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {rows.some(r => `${area}__${r.row_number}` === expandedRowKey) && (
+                      <div style={{ marginTop: 10, background: '#f9fafc', border: '1px solid #e5e8f2', borderRadius: 10, padding: 14, overflowX: 'auto' }}>
+                        {expandedRowPiles == null ? (
+                          <div style={{ fontSize: 13, color: '#9aa2c0' }}>Ladataan…</div>
+                        ) : (
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                            <thead>
+                              <tr>
+                                <th style={thStyle}>#</th>
+                                <th style={thStyle}>Koko</th>
+                                <th style={thStyle}>Lisätoimenpide</th>
+                                <th style={thStyle}>Vetotesti kN</th>
+                                <th style={thStyle}>Asentaja</th>
+                                <th style={thStyle}>Tila</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {expandedRowPiles.map((p, idx) => (
+                                <tr key={p.id}>
+                                  <td style={tdStyle}>{idx + 1}</td>
+                                  <td style={tdStyle}>{typeLabel(p.pile_type) || '–'}</td>
+                                  <td style={tdStyle}>{extraLabel(p.extra_action) || '–'}</td>
+                                  <td style={tdStyle}>{p.pull_test_kn ?? '–'}</td>
+                                  <td style={tdStyle}>{p.installed_by || '–'}</td>
+                                  <td style={tdStyle}>{p.status === 'done' ? '✅' : '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}
