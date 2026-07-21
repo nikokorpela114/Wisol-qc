@@ -207,10 +207,29 @@ export function parsePilePoints(text) {
   return piles
 }
 
-// Ryhmittää parsePilePoints():n palauttamat raa'at pisteet ihmisluettaviksi
-// riveiksi. Palauttaa litteän listan paaluja, joissa jokaisella on
-// row_number (juokseva, sijainnin mukaan lajiteltu) ja row_group_id
-// (alkuperäinen tai jälkiklusteroitu tunniste).
+// Kevyt CSV-muoto paalupisteille (pole_id,block_id,x,y) — käytetään ison
+// raa'an DXF:n sijaan, koska DXF (n. 100 MB+ XDATA:n takia) ylittää
+// Supabasen ilmaistason 50 MB tallennusrajan. CSV luodaan kerran
+// paikallisesti parsePilePoints():n avulla ja ladataan Storageen pienenä
+// tiedostona. Palauttaa saman muodon kuin parsePilePoints, joten
+// groupPilesIntoRows() toimii suoraan kummallakin.
+export function parsePileCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0)
+  const piles = []
+  // Ensimmäinen rivi on otsikko (pole_id,block_id,x,y) — ohitetaan
+  for (let i = 1; i < lines.length; i++) {
+    const [poleId, blockId, xStr, yStr] = lines[i].split(',')
+    const x = parseFloat(xStr), y = parseFloat(yStr)
+    if (poleId && !isNaN(x) && !isNaN(y)) {
+      piles.push({ poleId, blockId: blockId || 'unknown', x, y })
+    }
+  }
+  return piles
+}
+// Ryhmittää parsePilePoints():n (tai parsePileCSV():n) palauttamat raa'at
+// pisteet ihmisluettaviksi riveiksi. Palauttaa litteän listan paaluja,
+// joissa jokaisella on row_number (juokseva, sijainnin mukaan lajiteltu)
+// ja row_group_id (alkuperäinen tai jälkiklusteroitu tunniste).
 export function groupPilesIntoRows(piles) {
   // 1) Ryhmittele BlockID:n mukaan
   const byBlock = new Map()

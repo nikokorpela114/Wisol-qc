@@ -4,7 +4,7 @@
 // valikosta, samaan tapaan kuin ?valvomo.
 import React, { useState } from 'react'
 import { sb } from './supabaseClient.js'
-import { parsePilePoints, groupPilesIntoRows } from './dxfParser.js'
+import { parsePileCSV, groupPilesIntoRows } from './dxfParser.js'
 import { KNOWN_SITES } from './shared.js'
 
 const BATCH_SIZE = 500
@@ -24,20 +24,25 @@ export default function PileImport() {
     setDone(false)
     setLog([])
     try {
-      addLog(`Ladataan ${siteKey}.dxf Supabase Storagesta...`)
-      const { data, error } = await sb.storage.from('maps').download(`${siteKey}.dxf`)
+      // HUOM: paalukartta ladataan kevyenä CSV:nä ("{site}_piles.csv"), EI
+      // raakana DXF:nä — alkuperäinen DXF on n. 100 MB (XDATA:n takia) ja
+      // ylittäisi Supabasen ilmaistason 50 MB tallennusrajan. CSV on
+      // esikäsitelty paikallisesti samalla parsePilePoints()-logiikalla
+      // (vain pole_id, block_id, x, y) ja on n. 3 MB.
+      addLog(`Ladataan ${siteKey}_piles.csv Supabase Storagesta...`)
+      const { data, error } = await sb.storage.from('maps').download(`${siteKey}_piles.csv`)
       if (error || !data) {
-        addLog('❌ DXF:ää ei löytynyt bucketista "maps". Tarkista tiedostonimi.')
+        addLog('❌ CSV:tä ei löytynyt bucketista "maps". Tarkista tiedostonimi.')
         setBusy(false)
         return
       }
       const text = await data.text()
 
       addLog('Parsitaan paalupisteet...')
-      const rawPiles = parsePilePoints(text)
+      const rawPiles = parsePileCSV(text)
       addLog(`Löytyi ${rawPiles.length} paalupistettä.`)
       if (rawPiles.length === 0) {
-        addLog('❌ Ei paalupisteitä layerilla "PVcase Poles Centres" — tarkista että DXF on oikea paalukartta.')
+        addLog('❌ CSV ei sisältänyt yhtään paalupistettä — tarkista tiedoston sisältö.')
         setBusy(false)
         return
       }
