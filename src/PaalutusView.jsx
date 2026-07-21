@@ -47,7 +47,20 @@ export function typeLabel(code) {
 function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
   if (!piles || piles.length === 0) return null
   const xs = piles.map(p => p.x), ys = piles.map(p => p.y)
-  if (myLocation) { xs.push(myLocation.x); ys.push(myLocation.y) }
+  // Näytetään oma sijainti kartalla vain jos se on riittävän lähellä riviä
+  // (esim. 300m sisällä) — muuten se venyttäisi koko kartan valtaosin
+  // tyhjäksi tilaksi jos GPS-piste on kaukana (esim. testatessa sisällä).
+  const MAX_LOCATION_DIST_M = 300
+  let showLocation = false
+  if (myLocation) {
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2
+    const dist = Math.hypot(myLocation.x - cx, myLocation.y - cy)
+    if (dist <= MAX_LOCATION_DIST_M) {
+      showLocation = true
+      xs.push(myLocation.x); ys.push(myLocation.y)
+    }
+  }
   const minX = Math.min(...xs), maxX = Math.max(...xs)
   const minY = Math.min(...ys), maxY = Math.max(...ys)
   const spanX = Math.max(maxX - minX, 1)
@@ -59,10 +72,10 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
   // oikeassa suhteessa ja annetaan leveän rivin vierittyä sivusuunnassa.
   const PX_PER_M = 14
   const pad = 24
-  const boxH = 140
   const drawW = spanX * PX_PER_M
   const drawH = spanY * PX_PER_M
   const boxW = Math.max(320, drawW + pad * 2)
+  const boxH = Math.max(140, drawH + pad * 2)
   const offX = pad
   const offY = pad + Math.max(0, (boxH - pad * 2 - drawH) / 2)
 
@@ -73,7 +86,7 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
   const editingIdx = editingPile ? piles.indexOf(editingPile) : -1
 
   return (
-    <div style={{ overflowX: 'auto', marginBottom: 12, borderRadius: 8, background: '#eef4ec' }}>
+    <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 260, overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch', marginBottom: 12, borderRadius: 8, background: '#eef4ec' }}>
       <svg viewBox={`0 0 ${boxW} ${boxH}`} width={boxW} height={boxH} style={{ display: 'block' }}>
         <text x={boxW - 8} y={16} textAnchor="end" fontSize="11" fill="#666">N ↑</text>
         {piles.map((p, idx) => {
@@ -93,7 +106,7 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
             #{editingIdx + 1}
           </text>
         )}
-        {myLocation && (
+        {showLocation && (
           <g>
             <circle cx={tx(myLocation.x)} cy={ty(myLocation.y)} r={9} fill="#1a2fcc" fillOpacity={0.2} />
             <circle cx={tx(myLocation.x)} cy={ty(myLocation.y)} r={4} fill="#1a2fcc" stroke="#fff" strokeWidth={1.5} />
