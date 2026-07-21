@@ -146,3 +146,142 @@ export function parseDXF(text) {
 
   return { W, H, pvAreas, roads, boundaries, inserts, panelAreas, rowNumbers, minX, minY, maxX, maxY }
 }
+
+// ---------------------------------------------------------------------------
+// Paalutus (piling) support — paalukartat (esim. Isoneva) sisältävät VAIN
+// POINT-entiteettejä layerilla 'PVcase Poles Centres', EI tekstirivinumeroita.
+// Rivitieto on kuitenkin piilossa jokaisen pisteen XDATA:ssa (group code
+// 1001 = kentän nimi, seuraava 1000 = arvo), kenttänä 'PVCaseBlockID'.
+// Tämä funktio lukee raa'at paalupisteet ja niiden XDATA:n. Rivien
+// muodostus (groupPilesIntoRows) on erillinen funktio, koska ~99.8%
+// BlockID-ryhmistä on suoraan käyttökelpoisia riveinä, mutta muutama
+// poikkeus vaatii jälkiklusteroinnin sijainnin perusteella.
+export function parsePilePoints(text) {
+  const lines = text.split(/\r?\n/)
+  const n = lines.length
+  const piles = []
+
+  let i = 0
+  while (i < n) {
+    const code = lines[i]?.trim()
+    const val = lines[i + 1]?.trim() || ''
+
+    if (code === '0' && val === 'POINT') {
+      let layer = '', x = null, y = null
+      let lastAppField = ''
+      const xdata = {}
+      let j = i + 2
+      // Sama code+value pareittain -askellus (j += 2) kuin muuallakin tässä
+      // tiedostossa — XDATA:ssa 1001 (kentän nimi) ja sitä seuraava 1000
+      // (arvo) ovat kumpikin omia group code -rivejään, joten tämä toimii
+      // suoraan ilman erikoiskäsittelyä.
+      while (j < n && lines[j]?.trim() !== '0') {
+        const c = lines[j]?.trim()
+        const v = lines[j + 1]?.trim() || ''
+        if (c === '8') layer = v
+        if (c === '10') { try { x = parseFloat(v) } catch {} }
+        if (c === '20') { try { y = parseFloat(v) } catch {} }
+        if (c === '1001') lastAppField = v
+        if (c === '1000' && lastAppField) { xdata[lastAppField] = v; lastAppField = '' }
+        j += 2
+      }
+      if (layer === 'PVcase Poles Centres' && x !== null && y !== null) {
+        // HUOM: PVCasePoleId EI ole aina yksilöllinen — yhdessä sotkuisessa
+        // "roskakori"-BlockID-ryhmässä (ks. groupPilesIntoRows) sama
+        // PoleId toistuu useilla eri koordinaateilla, luultavasti PVcasen
+        // sisäinen oletus-/malli-ID. Liitetään koordinaatti mukaan
+        // varmuuden vuoksi, jotta poleId on aina aidosti yksilöllinen
+        // (piles-taulun 'pole_id' on unique).
+        const rawId = xdata.PVCasePoleId || 'p'
+        piles.push({
+          poleId: `${rawId}_${x.toFixed(3)}_${y.toFixed(3)}`,
+          blockId: xdata.PVCaseBlockID || 'unknown',
+          x, y
+        })
+      }
+      i = j
+      continue
+    }
+    i++
+  }
+  return piles
+}
+
+// Ryhmittää parsePilePoints():n palauttamat raa'at pisteet ihmisluettaviksi
+// riveiksi. Palauttaa litteän listan paaluja, joissa jokaisella on
+// row_number (juokseva, sijainnin mukaan lajiteltu) ja row_group_id
+// (alkuperäinen tai jälkiklusteroitu tunniste).
+export function groupPilesIntoRows(piles) {
+  // 1) Ryhmittele BlockID:n mukaan
+  const byBlock = new Map()
+  for (const p of piles) {
+    if (!byBlock.has(p.blockId)) byBlock.set(p.blockId, [])
+    byBlock.get(p.blockId).push(p)
+  }
+
+  const rowGroups = [] // { key, points: [...] }
+
+  for (const [blockId, pts] of byBlock) {
+    // Tarkista onko ryhmä "siisti" (korkeintaan 2 erillistä Y-linjaa,
+    // esim. paalutaulukon etu- ja takarivi) — sama tarkistus jolla
+    // 1093/1095 ryhmästä todettiin toimivan suoraan sellaisenaan.
+    const ys = [...new Set(pts.map(p => Math.round(p.y)))].sort((a, b) => a - b)
+    let yClusters = 1
+    for (let k = 1; k < ys.length; k++) {
+      if (ys[k] - ys[k - 1] > 3) yClusters++
+    }
+
+    if (yClusters <= 2) {
+      rowGroups.push({ key: blockId, points: pts })
+      continue
+    }
+
+    // "Sotkuinen" ryhmä (esim. BlockID uudelleenkäytetty eri puolilla
+    // työmaata) — klusteroidaan uudelleen sijainnin perusteella
+    // (union-find, kynnysarvo 15m — isompi kuin paalujen normaali väli
+    // rivillä ~2-5m, pienempi kuin etäisyys eri riviryhmien välillä).
+    const THRESH = 15
+    const parent = pts.map((_, idx) => idx)
+    function find(a) { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a] } return a }
+    function union(a, b) { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb }
+    for (let a = 0; a < pts.length; a++) {
+      for (let b = a + 1; b < pts.length; b++) {
+        const dx = pts[a].x - pts[b].x, dy = pts[a].y - pts[b].y
+        if (Math.sqrt(dx * dx + dy * dy) < THRESH) union(a, b)
+      }
+    }
+    const subGroups = new Map()
+    pts.forEach((p, idx) => {
+      const root = find(idx)
+      if (!subGroups.has(root)) subGroups.set(root, [])
+      subGroups.get(root).push(p)
+    })
+    let sub = 0
+    for (const subPts of subGroups.values()) {
+      rowGroups.push({ key: `${blockId}__${sub++}`, points: subPts })
+    }
+  }
+
+  // 2) Järjestä ryhmät sijainnin mukaan (pohjoisesta etelään, sitten
+  // lännestä itään) ja anna juokseva rivinumero.
+  rowGroups.forEach(g => {
+    g.avgX = g.points.reduce((s, p) => s + p.x, 0) / g.points.length
+    g.avgY = g.points.reduce((s, p) => s + p.y, 0) / g.points.length
+  })
+  rowGroups.sort((a, b) => (b.avgY - a.avgY) || (a.avgX - b.avgX))
+
+  const result = []
+  rowGroups.forEach((g, idx) => {
+    const rowNumber = idx + 1
+    for (const p of g.points) {
+      result.push({
+        poleId: p.poleId,
+        rowGroupId: g.key,
+        rowNumber,
+        x: p.x,
+        y: p.y
+      })
+    }
+  })
+  return result
+}

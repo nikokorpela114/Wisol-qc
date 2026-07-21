@@ -5,6 +5,8 @@ import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
 import InstallerView from './InstallerView.jsx'
 import Dashboard from './Dashboard.jsx'
+import PileImport from './PileImport.jsx'
+import PaalutusView from './PaalutusView.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
 import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, renderGroupMapImage, compressImage } from './shared.js'
 
@@ -30,6 +32,17 @@ export default function App() {
   // avoinna, mikä korjattu. Sama periaate kuin ?asentaja.
   if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('valvomo')) {
     return <Dashboard />
+  }
+  // ?paalutuonti — kertaluontoinen (uudelleenajettava) admin-sivu paalukartta-
+  // DXF:n tuontiin piles-tauluun. Ei linkitetty näkyvästä valikosta.
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('paalutuonti')) {
+    return <PileImport />
+  }
+  // ?paalutus — paalutajien oma näkymä. Täysin erillinen ?asentaja-
+  // näkymästä: oma komponentti, oma kirjautuminen (pile_operators-taulu,
+  // ei installers), oma data (piles-taulu, ei observations).
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('paalutus')) {
+    return <PaalutusView />
   }
 
   const [site, setSite] = useState('Isoneva, Suonenjoki')
