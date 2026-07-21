@@ -121,7 +121,9 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
 // käyttävät sekä paaluttajan vientinappi (jakaa puhelimen jakovalikolla)
 // että valvomon latausnappi (suora lataus, ei jakovalikkoa työpöydällä).
 export async function buildRowExportFiles(rowPiles, areaLabel, rowNumber, siteLabel) {
-  const rowLabel = `${areaLabel} rivi ${rowNumber}`
+  const doneCount = rowPiles.filter(p => p.status === 'done').length
+  const isPartial = doneCount < rowPiles.length
+  const rowLabel = `${areaLabel} rivi ${rowNumber}${isPartial ? ' (KESKEN)' : ''}`
   const dateStr = new Date().toLocaleDateString('fi-FI')
   const baseName = `${siteLabel} - ${rowLabel} - ${dateStr}`.replace(/\s+/g, '_')
 
@@ -160,11 +162,16 @@ export async function buildRowExportFiles(rowPiles, areaLabel, rowNumber, siteLa
   doc.text(`${siteLabel} — ${rowLabel}`, 14, 16)
   doc.setFontSize(10)
   doc.text(`Pvm: ${dateStr}`, 14, 23)
+  if (isPartial) {
+    doc.setTextColor(180, 100, 0)
+    doc.text(`Kesken — ${doneCount}/${rowPiles.length} paalua merkitty`, 14, 27)
+    doc.setTextColor(0, 0, 0)
+  }
 
   // Karttakuva (vektorina, samassa hengessä kuin puhelimen rivikartta) —
   // sovitetaan laatikkoon (ei vieritystä paperilla), säilyttää oikean
   // kuvasuhteen. Punainen rengas = vetotesti tehty.
-  let y = 30
+  let y = isPartial ? 33 : 30
   const mapX = 14, mapW = 182, mapH = 55
   doc.setDrawColor(200, 205, 220)
   doc.setFillColor(238, 244, 236)
@@ -528,12 +535,17 @@ export default function PaalutusView() {
           </>
         )}
 
-        {allDone && (
+        {doneCount > 0 && (
           <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, padding: 12, background: '#fff', borderTop: '1px solid #ddd' }}>
             <button onClick={exportRow}
               style={{ width: '100%', maxWidth: 480, margin: '0 auto', display: 'block', padding: 14, fontSize: 16, fontWeight: 'bold', background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 8 }}>
-              📤 Rivi valmis — vie PDF + Excel
+              {allDone ? '📤 Rivi valmis — vie PDF + Excel' : `📤 Vie osittainen rivi (${doneCount}/${rowPiles.length}) — PDF + Excel`}
             </button>
+            {!allDone && (
+              <p style={{ textAlign: 'center', fontSize: 12, color: '#999', marginTop: 4 }}>
+                Loput paalut säilyvät merkitsemättöminä — kuka tahansa voi jatkaa riviä myöhemmin.
+              </p>
+            )}
             {exportMsg && <p style={{ textAlign: 'center', fontSize: 13, marginTop: 6 }}>{exportMsg}</p>}
           </div>
         )}
