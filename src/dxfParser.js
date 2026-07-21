@@ -213,15 +213,23 @@ export function parsePilePoints(text) {
 // paikallisesti parsePilePoints():n avulla ja ladataan Storageen pienenä
 // tiedostona. Palauttaa saman muodon kuin parsePilePoints, joten
 // groupPilesIntoRows() toimii suoraan kummallakin.
+// Kevyt CSV-muoto paalupisteille — UUSI MUOTO (pole_id,area,row_number,x,y).
+// Rivinumerot ja aluejako ovat nyt OIKEITA, työmaan omia rivinumeroita
+// (sama 'Address'-layerin numerointi kuin paneelipöydissä, esim. 1,3,5,7...),
+// poimittu paikallisesti kahdeksasta erillisestä aluekohtaisesta
+// paalutuskartta-DXF:stä (CIRCLE-pisteet + lähin samalla Y-korkeudella oleva
+// rivinumero — sama periaate kuin findPinRow shared.js:ssä). EI enää tarvita
+// BlockID-arvailua tai jälkiklusterointia, koska rivi on jo tiedossa.
 export function parsePileCSV(text) {
   const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0)
   const piles = []
-  // Ensimmäinen rivi on otsikko (pole_id,block_id,x,y) — ohitetaan
+  // Ensimmäinen rivi on otsikko (pole_id,area,row_number,x,y) — ohitetaan
   for (let i = 1; i < lines.length; i++) {
-    const [poleId, blockId, xStr, yStr] = lines[i].split(',')
+    const [poleId, area, rowStr, xStr, yStr] = lines[i].split(',')
+    const rowNumber = parseInt(rowStr, 10)
     const x = parseFloat(xStr), y = parseFloat(yStr)
-    if (poleId && !isNaN(x) && !isNaN(y)) {
-      piles.push({ poleId, blockId: blockId || 'unknown', x, y })
+    if (poleId && area && !isNaN(rowNumber) && !isNaN(x) && !isNaN(y)) {
+      piles.push({ poleId, area, rowNumber, x, y })
     }
   }
   return piles

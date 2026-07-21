@@ -4,7 +4,7 @@
 // valikosta, samaan tapaan kuin ?valvomo.
 import React, { useState } from 'react'
 import { sb } from './supabaseClient.js'
-import { parsePileCSV, groupPilesIntoRows } from './dxfParser.js'
+import { parsePileCSV } from './dxfParser.js'
 import { KNOWN_SITES } from './shared.js'
 
 const BATCH_SIZE = 500
@@ -25,10 +25,10 @@ export default function PileImport() {
     setLog([])
     try {
       // HUOM: paalukartta ladataan kevyenä CSV:nä ("{site}_piles.csv"), EI
-      // raakana DXF:nä — alkuperäinen DXF on n. 100 MB (XDATA:n takia) ja
-      // ylittäisi Supabasen ilmaistason 50 MB tallennusrajan. CSV on
-      // esikäsitelty paikallisesti samalla parsePilePoints()-logiikalla
-      // (vain pole_id, block_id, x, y) ja on n. 3 MB.
+      // raakana DXF:nä. UUSI MUOTO: CSV sisältää jo OIKEAT työmaan
+      // rivinumerot ja aluejaon (pole_id,area,row_number,x,y), poimittu
+      // paikallisesti kahdeksasta aluekohtaisesta paalutuskartta-DXF:stä —
+      // ei enää tarvetta arvata/klusteroida rivejä sovelluksessa.
       addLog(`Ladataan ${siteKey}_piles.csv Supabase Storagesta...`)
       const { data, error } = await sb.storage.from('maps').download(`${siteKey}_piles.csv`)
       if (error || !data) {
@@ -39,18 +39,16 @@ export default function PileImport() {
       const text = await data.text()
 
       addLog('Parsitaan paalupisteet...')
-      const rawPiles = parsePileCSV(text)
-      addLog(`Löytyi ${rawPiles.length} paalupistettä.`)
-      if (rawPiles.length === 0) {
+      const rows = parsePileCSV(text)
+      addLog(`Löytyi ${rows.length} paalupistettä.`)
+      if (rows.length === 0) {
         addLog('❌ CSV ei sisältänyt yhtään paalupistettä — tarkista tiedoston sisältö.')
         setBusy(false)
         return
       }
-
-      addLog('Ryhmitellään rivit (XDATA + jälkiklusterointi)...')
-      const rows = groupPilesIntoRows(rawPiles)
-      const rowCount = new Set(rows.map(r => r.rowNumber)).size
-      addLog(`Muodostui ${rowCount} riviä.`)
+      const areaCount = new Set(rows.map(r => r.area)).size
+      const rowCount = new Set(rows.map(r => `${r.area}__${r.rowNumber}`)).size
+      addLog(`${areaCount} aluetta, ${rowCount} aluekohtaista riviä.`)
 
       addLog(`Tallennetaan Supabaseen (${BATCH_SIZE} kerrallaan, upsert pole_id:n mukaan)...`)
       let saved = 0
@@ -58,7 +56,8 @@ export default function PileImport() {
         const batch = rows.slice(i, i + BATCH_SIZE).map(r => ({
           site: siteKey,
           pole_id: r.poleId,
-          row_group_id: r.rowGroupId,
+          area: r.area,
+          row_group_id: `${r.area}_${r.rowNumber}`,
           row_number: r.rowNumber,
           x: r.x,
           y: r.y
@@ -73,7 +72,7 @@ export default function PileImport() {
         addLog(`  ...${saved} / ${rows.length} tallennettu`)
       }
 
-      addLog(`✅ Valmis! ${saved} paalua, ${rowCount} riviä tuotu työmaalle "${siteKey}".`)
+      addLog(`✅ Valmis! ${saved} paalua, ${areaCount} aluetta, ${rowCount} riviä tuotu työmaalle "${siteKey}".`)
       setDone(true)
     } catch (e) {
       addLog(`❌ Odottamaton virhe: ${e.message}`)
@@ -85,9 +84,10 @@ export default function PileImport() {
     <div style={{ maxWidth: 480, margin: '0 auto', padding: 20, fontFamily: 'sans-serif' }}>
       <h2>Paalujen tuonti DXF:stä</h2>
       <p style={{ color: '#666', fontSize: 14 }}>
-        Lukee valitun työmaan paalukartta-DXF:n Storagesta (bucket "maps"),
-        parsii paalupisteet ja rivit, ja tallentaa/päivittää ne piles-tauluun.
-        Tämän voi ajaa uudelleen turvallisesti (upsert pole_id:n mukaan, ei tee tuplia).
+        Lukee valitun työmaan paalu-CSV:n Storagesta (bucket "maps") — CSV
+        sisältää jo valmiin alue- ja rivijaon — ja tallentaa/päivittää ne
+        piles-tauluun. Tämän voi ajaa uudelleen turvallisesti (upsert
+        pole_id:n mukaan, ei tee tuplia).
       </p>
 
       <label style={{ display: 'block', marginBottom: 6, fontWeight: 'bold' }}>Työmaa</label>

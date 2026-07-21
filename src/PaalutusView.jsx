@@ -47,7 +47,8 @@ export default function PaalutusView() {
   const [loginErr, setLoginErr] = useState('')
 
   const [siteKey, setSiteKey] = useState('isoneva')
-  const [rowSummary, setRowSummary] = useState(null) // null = ladataan
+  const [rowSummary, setRowSummary] = useState(null) // null = ladataan, kaikki alueet+rivit tälle työmaalle
+  const [selectedArea, setSelectedArea] = useState(null)
   const [selectedRow, setSelectedRow] = useState(null)
   const [rowPiles, setRowPiles] = useState(null)
   const [editingId, setEditingId] = useState(null)
@@ -85,10 +86,10 @@ export default function PaalutusView() {
     setSelectedId(''); setPin('')
   }
 
-  // --- Rivilistan lataus ---
+  // --- Rivilistan lataus (kaikki alueet+rivit kerralla tälle työmaalle) ---
   const loadRowSummary = useCallback(() => {
     setRowSummary(null)
-    sb.from('pile_rows_summary').select('*').eq('site', siteKey).order('row_number').then(({ data, error }) => {
+    sb.from('pile_rows_summary').select('*').eq('site', siteKey).order('area').order('row_number').then(({ data, error }) => {
       setRowSummary(error ? [] : (data || []))
     })
   }, [siteKey])
@@ -97,12 +98,29 @@ export default function PaalutusView() {
     if (session) loadRowSummary()
   }, [session, loadRowSummary])
 
-  // --- Yksittäisen rivin paalujen lataus ---
+  useEffect(() => { setSelectedArea(null); setSelectedRow(null) }, [siteKey])
+
+  // Alueiden yhteenveto lasketaan rowSummary:sta (ei erillistä kyselyä)
+  const areaSummary = React.useMemo(() => {
+    if (!rowSummary) return null
+    const byArea = new Map()
+    for (const r of rowSummary) {
+      if (!byArea.has(r.area)) byArea.set(r.area, { area: r.area, rows: 0, rowsDone: 0, total: 0, done: 0 })
+      const a = byArea.get(r.area)
+      a.rows += 1
+      if (r.row_complete) a.rowsDone += 1
+      a.total += r.total_piles
+      a.done += r.done_piles
+    }
+    return [...byArea.values()].sort((a, b) => a.area.localeCompare(b.area))
+  }, [rowSummary])
+
+  // --- Yksittäisen rivin paalujen lataus (aina alueen sisällä) ---
   function openRow(rowNumber) {
     setSelectedRow(rowNumber)
     setRowPiles(null)
     setEditingId(null)
-    sb.from('piles').select('*').eq('site', siteKey).eq('row_number', rowNumber).order('id')
+    sb.from('piles').select('*').eq('site', siteKey).eq('area', selectedArea).eq('row_number', rowNumber).order('id')
       .then(({ data, error }) => setRowPiles(error ? [] : (data || [])))
   }
 
@@ -111,6 +129,12 @@ export default function PaalutusView() {
     setRowPiles(null)
     setEditingId(null)
     loadRowSummary()
+  }
+
+  function closeArea() {
+    setSelectedArea(null)
+    setSelectedRow(null)
+    setRowPiles(null)
   }
 
   function startEdit(pile) {
@@ -144,7 +168,7 @@ export default function PaalutusView() {
   async function exportRow() {
     if (!rowPiles || rowPiles.length === 0) return
     setExportMsg('Luodaan tiedostoja...')
-    const rowLabel = `Rivi ${selectedRow}`
+    const rowLabel = `${selectedArea} rivi ${selectedRow}`
     const siteLabel = KNOWN_SITES.find(s => s.key === siteKey)?.label || siteKey
     const dateStr = new Date().toLocaleDateString('fi-FI')
 
@@ -221,7 +245,7 @@ export default function PaalutusView() {
         <button onClick={closeRow} style={{ marginBottom: 12, padding: '8px 12px', border: '1px solid #ccc', borderRadius: 6, background: '#fff' }}>
           ← Takaisin riveihin
         </button>
-        <h2>Rivi {selectedRow}</h2>
+        <h2>{selectedArea} — rivi {selectedRow}</h2>
         {rowPiles == null ? <p>Ladataan...</p> : (
           <>
             <p style={{ color: '#666' }}>{doneCount} / {rowPiles.length} paalua merkitty</p>
@@ -286,37 +310,67 @@ export default function PaalutusView() {
     )
   }
 
-  // --- Rivilistanäkymä ---
+  // --- Aluevalintanäkymä ---
+  if (selectedArea == null) {
+    return (
+      <div style={{ maxWidth: 480, margin: '0 auto', padding: 16, fontFamily: 'sans-serif' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h2 style={{ margin: 0 }}>Paalutus — {session.name}</h2>
+          <button onClick={logout} style={{ padding: '6px 10px', border: '1px solid #ccc', borderRadius: 6, background: '#fff', fontSize: 13 }}>
+            Vaihda käyttäjä
+          </button>
+        </div>
+
+        <select value={siteKey} onChange={e => setSiteKey(e.target.value)}
+          style={{ width: '100%', padding: 8, fontSize: 15, marginBottom: 12 }}>
+          {KNOWN_SITES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+
+        {areaSummary == null ? <p>Ladataan alueita...</p> :
+          areaSummary.length === 0 ? <p>Ei paalutietoja tälle työmaalle. Onko tuonti (?paalutuonti) ajettu?</p> :
+          areaSummary.map(a => {
+            const complete = a.rowsDone === a.rows
+            return (
+              <div key={a.area} onClick={() => setSelectedArea(a.area)}
+                style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: 14, marginBottom: 6, borderRadius: 8, cursor: 'pointer',
+                  background: complete ? '#e8f5e9' : '#f7f7f7', border: '1px solid #e0e0e0'
+                }}>
+                <b>{a.area}</b>
+                <span style={{ color: complete ? '#1a7a45' : '#666', fontSize: 14 }}>
+                  {a.rowsDone}/{a.rows} riviä · {a.done}/{a.total} paalua {complete ? '✅' : ''}
+                </span>
+              </div>
+            )
+          })
+        }
+      </div>
+    )
+  }
+
+  // --- Rivilistanäkymä (valitun alueen sisällä) ---
+  const areaRows = (rowSummary || []).filter(r => r.area === selectedArea)
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: 16, fontFamily: 'sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>Paalutus — {session.name}</h2>
-        <button onClick={logout} style={{ padding: '6px 10px', border: '1px solid #ccc', borderRadius: 6, background: '#fff', fontSize: 13 }}>
-          Vaihda käyttäjä
-        </button>
-      </div>
+      <button onClick={closeArea} style={{ marginBottom: 12, padding: '8px 12px', border: '1px solid #ccc', borderRadius: 6, background: '#fff' }}>
+        ← Takaisin alueisiin
+      </button>
+      <h2 style={{ marginTop: 0 }}>{selectedArea}</h2>
 
-      <select value={siteKey} onChange={e => setSiteKey(e.target.value)}
-        style={{ width: '100%', padding: 8, fontSize: 15, marginBottom: 12 }}>
-        {KNOWN_SITES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-      </select>
-
-      {rowSummary == null ? <p>Ladataan rivejä...</p> :
-        rowSummary.length === 0 ? <p>Ei paalutietoja tälle työmaalle. Onko tuonti (?paalutuonti) ajettu?</p> :
-        rowSummary.map(r => (
-          <div key={r.row_number} onClick={() => openRow(r.row_number)}
-            style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: 14, marginBottom: 6, borderRadius: 8, cursor: 'pointer',
-              background: r.row_complete ? '#e8f5e9' : '#f7f7f7', border: '1px solid #e0e0e0'
-            }}>
-            <b>Rivi {r.row_number}</b>
-            <span style={{ color: r.row_complete ? '#1a7a45' : '#666' }}>
-              {r.done_piles} / {r.total_piles} {r.row_complete ? '✅' : ''}
-            </span>
-          </div>
-        ))
-      }
+      {areaRows.map(r => (
+        <div key={r.row_number} onClick={() => openRow(r.row_number)}
+          style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: 14, marginBottom: 6, borderRadius: 8, cursor: 'pointer',
+            background: r.row_complete ? '#e8f5e9' : '#f7f7f7', border: '1px solid #e0e0e0'
+          }}>
+          <b>Rivi {r.row_number}</b>
+          <span style={{ color: r.row_complete ? '#1a7a45' : '#666' }}>
+            {r.done_piles} / {r.total_piles} {r.row_complete ? '✅' : ''}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }
