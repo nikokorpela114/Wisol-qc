@@ -4,6 +4,7 @@
 // Avataan osoitteella ?paalutus.
 import React, { useState, useEffect, useCallback } from 'react'
 import { sb } from './supabaseClient.js'
+import { latLngToTM35FIN } from './coords.js'
 import { KNOWN_SITES } from './shared.js'
 
 const SESSION_KEY = 'wisol_pile_operator_session'
@@ -43,9 +44,10 @@ function typeLabel(code) {
 // Y kasvaa pohjoiseen), säilyttää oikean kuvasuhteen (rivi on yleensä pitkä
 // ja kapea). Paalu numeroitu samalla numerolla kuin listassa alla, väritetty
 // tilan mukaan, ja tapista voi avata saman muokkauksen kuin listasta.
-function RowMiniMap({ piles, editingId, onSelect }) {
+function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
   if (!piles || piles.length === 0) return null
   const xs = piles.map(p => p.x), ys = piles.map(p => p.y)
+  if (myLocation) { xs.push(myLocation.x); ys.push(myLocation.y) }
   const minX = Math.min(...xs), maxX = Math.max(...xs)
   const minY = Math.min(...ys), maxY = Math.max(...ys)
   const spanX = Math.max(maxX - minX, 1)
@@ -89,6 +91,12 @@ function RowMiniMap({ piles, editingId, onSelect }) {
             #{editingIdx + 1}
           </text>
         )}
+        {myLocation && (
+          <g>
+            <circle cx={tx(myLocation.x)} cy={ty(myLocation.y)} r={9} fill="#1a2fcc" fillOpacity={0.2} />
+            <circle cx={tx(myLocation.x)} cy={ty(myLocation.y)} r={4} fill="#1a2fcc" stroke="#fff" strokeWidth={1.5} />
+          </g>
+        )}
       </svg>
     </div>
   )
@@ -112,6 +120,17 @@ export default function PaalutusView() {
   const [formKn, setFormKn] = useState('')
   const [saving, setSaving] = useState(false)
   const [exportMsg, setExportMsg] = useState('')
+  const [myLocation, setMyLocation] = useState(null)
+
+  // GPS-seuranta vain kun rivinäkymä on auki (säästää akkua muualla)
+  useEffect(() => {
+    if (selectedRow == null || !navigator.geolocation) return
+    const watcher = navigator.geolocation.watchPosition(pos => {
+      const { x, y } = latLngToTM35FIN(pos.coords.latitude, pos.coords.longitude)
+      setMyLocation({ x, y })
+    }, () => {}, { enableHighAccuracy: true })
+    return () => navigator.geolocation.clearWatch(watcher)
+  }, [selectedRow])
 
   // --- Kirjautuminen ---
   useEffect(() => {
@@ -210,11 +229,26 @@ export default function PaalutusView() {
     setFormKn(pile.pull_test_kn ?? '')
   }
 
+  // Kopioi lomakkeeseen lähimmän EDELLISEN (rivijärjestyksessä taaksepäin)
+  // jo merkityn paalun tiedot — nopeuttaa kun peräkkäiset paalut ovat samaa.
+  function copyPrevious(pileId) {
+    const idx = rowPiles.findIndex(p => p.id === pileId)
+    for (let i = idx - 1; i >= 0; i--) {
+      if (rowPiles[i].status === 'done') {
+        setFormType(rowPiles[i].pile_type || '')
+        setFormExtra(rowPiles[i].extra_action || '')
+        setFormKn(rowPiles[i].pull_test_kn ?? '')
+        return
+      }
+    }
+    alert('Ei aiempaa merkittyä paalua tällä rivillä.')
+  }
+
   async function savePile(pileId) {
-    if (!formType) { alert('Valitse paalukoko'); return }
+    if (!formType && !formExtra) { alert('Valitse paalukoko tai lisätoimenpide (esim. ankkurointi)') ; return }
     setSaving(true)
     const { data, error } = await sb.from('piles').update({
-      pile_type: formType,
+      pile_type: formType || null,
       extra_action: formExtra || null,
       pull_test_kn: formKn === '' ? null : parseFloat(formKn),
       status: 'done',
@@ -314,7 +348,7 @@ export default function PaalutusView() {
         <h2>{selectedArea} — rivi {selectedRow}</h2>
         {rowPiles == null ? <p>Ladataan...</p> : (
           <>
-            <RowMiniMap piles={rowPiles} editingId={editingId} onSelect={p => editingId === p.id ? setEditingId(null) : startEdit(p)} />
+            <RowMiniMap piles={rowPiles} editingId={editingId} onSelect={p => editingId === p.id ? setEditingId(null) : startEdit(p)} myLocation={myLocation} />
             <p style={{ color: '#666' }}>{doneCount} / {rowPiles.length} paalua merkitty</p>
             {rowPiles.map((p, idx) => (
               <div key={p.id} style={{
@@ -336,6 +370,11 @@ export default function PaalutusView() {
 
                 {editingId === p.id && (
                   <div style={{ marginTop: 10, borderTop: '1px solid #eee', paddingTop: 10 }}>
+                    <button onClick={() => copyPrevious(p.id)}
+                      style={{ width: '100%', padding: 8, marginBottom: 10, fontSize: 13, background: '#eef1ff', color: '#1a2fcc', border: '1px solid #c7cdf5', borderRadius: 6 }}>
+                      ↺ Kopioi edellinen
+                    </button>
+
                     <label style={{ fontSize: 13, fontWeight: 'bold' }}>Paalukoko</label>
                     <select value={formType} onChange={e => setFormType(e.target.value)}
                       style={{ width: '100%', padding: 8, fontSize: 15, marginBottom: 8 }}>
@@ -353,10 +392,16 @@ export default function PaalutusView() {
                     <input type="number" inputMode="decimal" value={formKn} onChange={e => setFormKn(e.target.value)}
                       style={{ width: '100%', padding: 8, fontSize: 15, marginBottom: 10 }} />
 
-                    <button onClick={() => savePile(p.id)} disabled={saving}
-                      style={{ width: '100%', padding: 10, fontWeight: 'bold', background: '#1a7a45', color: '#fff', border: 'none', borderRadius: 6 }}>
-                      {saving ? 'Tallennetaan...' : '✓ Tallenna'}
-                    </button>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => { setFormType(''); setFormExtra(''); setFormKn('') }}
+                        style={{ flex: 1, padding: 10, fontWeight: 'bold', background: '#fff', color: '#666', border: '1px solid #ccc', borderRadius: 6 }}>
+                        ✕ Tyhjennä
+                      </button>
+                      <button onClick={() => savePile(p.id)} disabled={saving}
+                        style={{ flex: 2, padding: 10, fontWeight: 'bold', background: '#1a7a45', color: '#fff', border: 'none', borderRadius: 6 }}>
+                        {saving ? 'Tallennetaan...' : '✓ Tallenna'}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
