@@ -116,6 +116,7 @@ export default function PaalutusView() {
   const [rowPiles, setRowPiles] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [formType, setFormType] = useState('')
+  const [formCustomType, setFormCustomType] = useState('')
   const [formExtra, setFormExtra] = useState('')
   const [formKn, setFormKn] = useState('')
   const [saving, setSaving] = useState(false)
@@ -222,9 +223,21 @@ export default function PaalutusView() {
     setRowPiles(null)
   }
 
+  // Lataa tallennetun paalukoon lomakkeeseen — jos arvo ei täsmää mihinkään
+  // vakiokokoon (A-I), se on aiemmin kirjoitettu vapaa teksti ("Jokin muu").
+  function applyPileTypeToForm(pileType) {
+    if (pileType && !PILE_TYPES.find(t => t.code === pileType)) {
+      setFormType('__muu__')
+      setFormCustomType(pileType)
+    } else {
+      setFormType(pileType || '')
+      setFormCustomType('')
+    }
+  }
+
   function startEdit(pile) {
     setEditingId(pile.id)
-    setFormType(pile.pile_type || '')
+    applyPileTypeToForm(pile.pile_type)
     setFormExtra(pile.extra_action || '')
     setFormKn(pile.pull_test_kn ?? '')
   }
@@ -235,7 +248,7 @@ export default function PaalutusView() {
     const idx = rowPiles.findIndex(p => p.id === pileId)
     for (let i = idx - 1; i >= 0; i--) {
       if (rowPiles[i].status === 'done') {
-        setFormType(rowPiles[i].pile_type || '')
+        applyPileTypeToForm(rowPiles[i].pile_type)
         setFormExtra(rowPiles[i].extra_action || '')
         setFormKn(rowPiles[i].pull_test_kn ?? '')
         return
@@ -246,9 +259,11 @@ export default function PaalutusView() {
 
   async function savePile(pileId) {
     if (!formType && !formExtra) { alert('Valitse paalukoko tai lisätoimenpide (esim. ankkurointi)') ; return }
+    if (formType === '__muu__' && !formCustomType.trim()) { alert('Kirjoita paalukoko tekstikenttään'); return }
+    const finalType = formType === '__muu__' ? formCustomType.trim() : formType
     setSaving(true)
     const { data, error } = await sb.from('piles').update({
-      pile_type: formType || null,
+      pile_type: finalType || null,
       extra_action: formExtra || null,
       pull_test_kn: formKn === '' ? null : parseFloat(formKn),
       status: 'done',
@@ -396,10 +411,16 @@ export default function PaalutusView() {
 
                     <label style={{ fontSize: 13, fontWeight: 'bold' }}>Paalukoko</label>
                     <select value={formType} onChange={e => setFormType(e.target.value)}
-                      style={{ width: '100%', padding: 8, fontSize: 15, marginBottom: 8 }}>
+                      style={{ width: '100%', padding: 8, fontSize: 15, marginBottom: formType === '__muu__' ? 8 : 8 }}>
                       <option value="">Valitse...</option>
                       {PILE_TYPES.map(t => <option key={t.code} value={t.code}>{t.label}</option>)}
+                      <option value="__muu__">Jokin muu…</option>
                     </select>
+                    {formType === '__muu__' && (
+                      <input type="text" value={formCustomType} onChange={e => setFormCustomType(e.target.value)}
+                        placeholder="Kirjoita paalukoko, esim. 2800×120"
+                        style={{ width: '100%', padding: 8, fontSize: 15, marginBottom: 8 }} />
+                    )}
 
                     <label style={{ fontSize: 13, fontWeight: 'bold' }}>Lisätoimenpide</label>
                     <select value={formExtra} onChange={e => setFormExtra(e.target.value)}
@@ -412,7 +433,7 @@ export default function PaalutusView() {
                       style={{ width: '100%', padding: 8, fontSize: 15, marginBottom: 10 }} />
 
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={() => { setFormType(''); setFormExtra(''); setFormKn('') }}
+                      <button onClick={() => { setFormType(''); setFormCustomType(''); setFormExtra(''); setFormKn('') }}
                         style={{ flex: 1, padding: 10, fontWeight: 'bold', background: '#fff', color: '#666', border: '1px solid #ccc', borderRadius: 6 }}>
                         ✕ Tyhjennä
                       </button>
