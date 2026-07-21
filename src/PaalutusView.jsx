@@ -9,7 +9,7 @@ import { KNOWN_SITES } from './shared.js'
 
 const SESSION_KEY = 'wisol_pile_operator_session'
 
-const PILE_TYPES = [
+export const PILE_TYPES = [
   { code: 'A', label: 'A — 2500×100' },
   { code: 'B', label: 'B — 2500×150' },
   { code: 'BB', label: 'BB — 2500×250' },
@@ -23,7 +23,7 @@ const PILE_TYPES = [
   { code: 'I', label: 'I — 5000×150 (+jatko 2500)' },
 ]
 
-const EXTRA_ACTIONS = [
+export const EXTRA_ACTIONS = [
   { code: '', label: 'Ei lisätoimenpidettä' },
   { code: 'jatkopala_1650', label: 'Jatkopala 1650 mm' },
   { code: 'jatkopala_2200', label: 'Jatkopala 2200 mm' },
@@ -33,10 +33,10 @@ const EXTRA_ACTIONS = [
   { code: 'kiven_poisto', label: 'Pienen kiven poisto' },
 ]
 
-function extraLabel(code) {
+export function extraLabel(code) {
   return EXTRA_ACTIONS.find(e => e.code === code)?.label || code || ''
 }
-function typeLabel(code) {
+export function typeLabel(code) {
   return PILE_TYPES.find(t => t.code === code)?.label || code || ''
 }
 
@@ -78,10 +78,12 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
         <text x={boxW - 8} y={16} textAnchor="end" fontSize="11" fill="#666">N ↑</text>
         {piles.map((p, idx) => {
           const isEditing = editingId === p.id
+          const hasPullTest = p.pull_test_kn != null
           const color = p.status === 'done' ? '#1a7a45' : '#999'
           return (
             <g key={p.id} onClick={() => onSelect(p)} style={{ cursor: 'pointer' }}>
               {isEditing && <circle cx={tx(p.x)} cy={ty(p.y)} r={9} fill="none" stroke="#1a2fcc" strokeWidth={2} />}
+              {hasPullTest && <circle cx={tx(p.x)} cy={ty(p.y)} r={8} fill="none" stroke="#d63030" strokeWidth={2} />}
               <circle cx={tx(p.x)} cy={ty(p.y)} r={5} fill={color} stroke="#fff" strokeWidth={1} />
             </g>
           )
@@ -100,9 +102,7 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
       </svg>
     </div>
   )
-}
-
-export default function PaalutusView() {
+}export default function PaalutusView() {
   const [session, setSession] = useState(null)
   const [operators, setOperators] = useState([])
   const [selectedId, setSelectedId] = useState('')
@@ -288,15 +288,35 @@ export default function PaalutusView() {
     const dateStr = new Date().toLocaleDateString('fi-FI')
     const baseName = `${siteLabel} - ${rowLabel} - ${dateStr}`.replace(/\s+/g, '_')
 
-    // CSV (avautuu suoraan Exceliin)
-    const csvHeader = 'Paalu #;Paalukoko;Lisätoimenpide;Vetotesti (kN);Asentaja;Aika\n'
-    const csvRows = rowPiles.map((p, idx) =>
-      [idx + 1, typeLabel(p.pile_type), extraLabel(p.extra_action), p.pull_test_kn ?? '', p.installed_by || '', p.installed_at ? new Date(p.installed_at).toLocaleString('fi-FI') : '']
-        .map(v => String(v).replace(/;/g, ',')).join(';')
-    ).join('\n')
-    const csvBlob = new Blob(['\uFEFF' + csvHeader + csvRows], { type: 'text/csv;charset=utf-8' })
+    // Excel (.xlsx) — vetotestatut paalut punaisella solutaustalla
+    const ExcelJS = await import('exceljs')
+    const wb = new ExcelJS.Workbook()
+    const ws = wb.addWorksheet(rowLabel.slice(0, 31))
+    ws.columns = [
+      { header: 'Paalu #', key: 'idx', width: 8 },
+      { header: 'Paalukoko', key: 'type', width: 18 },
+      { header: 'Lisätoimenpide', key: 'extra', width: 30 },
+      { header: 'Vetotesti (kN)', key: 'kn', width: 14 },
+      { header: 'Asentaja', key: 'by', width: 16 },
+      { header: 'Aika', key: 'at', width: 18 },
+    ]
+    ws.getRow(1).font = { bold: true }
+    const redFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7D6D6' } }
+    rowPiles.forEach((p, idx) => {
+      const row = ws.addRow({
+        idx: idx + 1,
+        type: typeLabel(p.pile_type),
+        extra: extraLabel(p.extra_action),
+        kn: p.pull_test_kn ?? '',
+        by: p.installed_by || '',
+        at: p.installed_at ? new Date(p.installed_at).toLocaleString('fi-FI') : '',
+      })
+      if (p.pull_test_kn != null) row.eachCell(c => { c.fill = redFill })
+    })
+    const xlsxBuffer = await wb.xlsx.writeBuffer()
+    const xlsxBlob = new Blob([xlsxBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
 
-    // PDF
+    // PDF — vetotestatut paalut punaisella tekstillä
     const { jsPDF } = await import('jspdf')
     const doc = new jsPDF({ unit: 'mm', format: 'a4' })
     doc.setFontSize(14)
@@ -305,12 +325,15 @@ export default function PaalutusView() {
     doc.text(`Pvm: ${dateStr}`, 14, 23)
     let y = 32
     doc.setFontSize(9)
+    doc.setTextColor(0, 0, 0)
     doc.text('#', 14, y); doc.text('Koko', 24, y); doc.text('Lisätoimenpide', 50, y)
     doc.text('Vetotesti kN', 110, y); doc.text('Asentaja', 140, y)
     y += 5
     doc.line(14, y - 3, 196, y - 3)
     rowPiles.forEach((p, idx) => {
       if (y > 280) { doc.addPage(); y = 16 }
+      const hasPullTest = p.pull_test_kn != null
+      doc.setTextColor(hasPullTest ? 214 : 0, hasPullTest ? 48 : 0, hasPullTest ? 48 : 0)
       doc.text(String(idx + 1), 14, y)
       doc.text(typeLabel(p.pile_type) || '-', 24, y)
       doc.text(extraLabel(p.extra_action) || '-', 50, y, { maxWidth: 58 })
@@ -318,30 +341,31 @@ export default function PaalutusView() {
       doc.text(p.installed_by || '-', 140, y)
       y += 6
     })
+    doc.setTextColor(0, 0, 0)
     const pdfBlob = doc.output('blob')
 
     // Jaa puhelimen omalla jakovalikolla (sama tapa kuin valvomon PDF-jaossa
     // App.jsx:ssä) — huomattavasti nopeampi ja luotettavampi kuin lataus-
     // linkit, erityisesti iOS Safarissa jossa <a download> toimii huonosti.
     const pdfFile = new File([pdfBlob], `${baseName}.pdf`, { type: 'application/pdf' })
-    const csvFile = new File([csvBlob], `${baseName}.csv`, { type: 'text/csv' })
+    const xlsxFile = new File([xlsxBlob], `${baseName}.xlsx`, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
 
-    if (navigator.canShare?.({ files: [pdfFile, csvFile] })) {
+    if (navigator.canShare?.({ files: [pdfFile, xlsxFile] })) {
       try {
-        await navigator.share({ files: [pdfFile, csvFile], title: rowLabel })
+        await navigator.share({ files: [pdfFile, xlsxFile], title: rowLabel })
         setExportMsg('✅ Lähetetty.')
       } catch {
         setExportMsg('')
       }
     } else {
       // Varalla, jos jakotoiminto ei ole tuettu: lataus
-      for (const [blob, name] of [[pdfBlob, `${baseName}.pdf`], [csvBlob, `${baseName}.csv`]]) {
+      for (const [blob, name] of [[pdfBlob, `${baseName}.pdf`], [xlsxBlob, `${baseName}.xlsx`]]) {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a'); a.href = url; a.download = name
         document.body.appendChild(a); a.click(); document.body.removeChild(a)
         setTimeout(() => URL.revokeObjectURL(url), 3000)
       }
-      setExportMsg('✅ PDF ja CSV ladattu — lähetä ne työnjohdolle esim. sähköpostilla tai WhatsAppilla.')
+      setExportMsg('✅ PDF ja Excel ladattu — lähetä ne työnjohdolle esim. sähköpostilla tai WhatsAppilla.')
     }
   }
 
@@ -382,6 +406,7 @@ export default function PaalutusView() {
           <>
             <div style={{ position: 'sticky', top: 0, zIndex: 5, background: '#f7f8fb', paddingTop: 4, paddingBottom: 4 }}>
               <RowMiniMap piles={rowPiles} editingId={editingId} onSelect={p => editingId === p.id ? setEditingId(null) : startEdit(p)} myLocation={myLocation} />
+              <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>🔴 punainen rinkula = vetotesti tehty</div>
             </div>
             <p style={{ color: '#666' }}>{doneCount} / {rowPiles.length} paalua merkitty</p>
             {rowPiles.map((p, idx) => (
