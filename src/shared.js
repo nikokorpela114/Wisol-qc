@@ -231,11 +231,21 @@ export function findPinRow(mapData, pin) {
   // kesken rivin ei aina tarkoita eri riviä). Jos numeroa ei löydy
   // jommaltakummalta puolelta, ollaan varovaisia ja katkaistaan
   // (turvallinen oletus).
+  // TILAPÄINEN DEBUG (näkyy suoraan ruudulla "Havaittu rivi"-tekstin
+  // alla, ks. App.jsx) — poista kun rivinketjutuksen reunatapaukset on
+  // saatu kuntoon, ei tarkoitettu pysyväksi.
+  const dbg = []
+
   const canBridgeGap = (xA, xB) => {
-    if (crossesLines(mapData.aluejako || [], xA, xB)) return false
+    if (crossesLines(mapData.aluejako || [], xA, xB)) {
+      dbg.push(`aluejako x${Math.round(xA)}-${Math.round(xB)}: KATKO`)
+      return false
+    }
     if (!crossesLines(mapData.roads, xA, xB)) return true
     const labelA = nearestRowLabel(xA), labelB = nearestRowLabel(xB)
-    return !!(labelA && labelB && labelA === labelB)
+    const ok = !!(labelA && labelB && labelA === labelB)
+    dbg.push(`tie x${Math.round(xA)}-${Math.round(xB)}: A=${labelA ?? '–'} B=${labelB ?? '–'} -> ${ok ? 'SILTA' : 'KATKO'}`)
+    return ok
   }
 
   const sameY = mapData.inserts
@@ -244,6 +254,7 @@ export function findPinRow(mapData, pin) {
     .sort((a, b) => a.left - b.left)
 
   const hitPos = sameY.findIndex(e => e.idx === hitIdx)
+  dbg.push(`hit y=${Math.round(hit.y)} yTol=${Math.round(yTol)} sameY=${sameY.length}kpl hitPos=${hitPos}`)
 
   const chain = [sameY[hitPos]]
   for (let i = hitPos - 1; i >= 0; i--) {
@@ -252,14 +263,15 @@ export function findPinRow(mapData, pin) {
     // gap < -1: lohkot ovat selvästi päällekkäin (esim. DXF:n duplikoitu/
     // limittyvä data) — ei ketjuteta tällaisen läpi.
     if (gap >= -1 && gap <= gapTol && canBridgeGap(sameY[i].right, edge)) chain.unshift(sameY[i])
-    else break
+    else { dbg.push(`vasen pysähtyi: gap=${Math.round(gap)} gapTol=${Math.round(gapTol)}`); break }
   }
   for (let i = hitPos + 1; i < sameY.length; i++) {
     const edge = chain[chain.length - 1].right
     const gap = sameY[i].left - edge
     if (gap >= -1 && gap <= gapTol && canBridgeGap(edge, sameY[i].left)) chain.push(sameY[i])
-    else break
+    else { dbg.push(`oikea pysähtyi: gap=${Math.round(gap)} gapTol=${Math.round(gapTol)}`); break }
   }
+  dbg.push(`ketju: ${chain.length}kpl, left=${Math.round(chain[0].left)} right=${Math.round(chain[chain.length - 1].right)}`)
 
   // 3. Rivin oma oikea reuna = suurin (ins.x + leveys) vain ketjuun kuuluvista lohkoista
   const rowRightX = Math.max(...chain.map(e => e.right))
@@ -302,7 +314,8 @@ export function findPinRow(mapData, pin) {
     })
     if (label2 && best2 <= maxLabelDist * 1.5) { best = best2; label = label2 }
   }
-  if (!label || best > maxLabelDist * 1.5) return null
+  dbg.push(`label-haku: target=(${Math.round(targetX)},${Math.round(targetY)}) löytyi=${label ?? '–'} etäisyys=${Math.round(best)} maxDist=${Math.round(maxLabelDist * 1.5)}`)
+  if (!label || best > maxLabelDist * 1.5) return { rowIdx: hitIdx, label: null, rowInsertIdxs: chain.map(e => e.idx), debug: dbg.join(' | ') }
 
   // Palautetaan myös koko rivin (ketjun) lohkojen indeksit — näitä tarvitaan
   // kun halutaan korostaa/rajata koko rivi eikä vain sitä yhtä lohkoa johon
@@ -310,7 +323,7 @@ export function findPinRow(mapData, pin) {
   // yhteiskartassa).
   const rowInsertIdxs = chain.map(e => e.idx)
 
-  return { rowIdx: hitIdx, label, rowInsertIdxs }
+  return { rowIdx: hitIdx, label, rowInsertIdxs, debug: dbg.join(' | ') }
 }
 
 // Renders a small, STATIC (non-interactive) map snapshot cropped around a

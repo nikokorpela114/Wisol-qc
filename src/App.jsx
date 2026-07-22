@@ -898,11 +898,20 @@ export default function App() {
                     />
                     {o.pin && (() => {
                       const r = findPinRow(mapData, o.pin)
-                      return r ? (
-                        <div style={{ marginTop: 6, fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
-                          📍 Havaittu rivi: {r.label}
+                      return (
+                        <div>
+                          {r?.label && (
+                            <div style={{ marginTop: 6, fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
+                              📍 Havaittu rivi: {r.label}
+                            </div>
+                          )}
+                          {r?.debug && (
+                            <div style={{ marginTop: 4, fontSize: 10, color: '#999', fontFamily: 'monospace', wordBreak: 'break-word' }}>
+                              🐞 {r.debug}
+                            </div>
+                          )}
                         </div>
-                      ) : null
+                      )
                     })()}
                     {o.pin && (
                       <div style={{ marginTop: 8 }}>
