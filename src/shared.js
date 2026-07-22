@@ -433,8 +433,9 @@ export function renderGroupMapImage(mapData, items) {
   // Y-korkeudella (samalla rivillä) kuin jokin pinneistä — sama periaate
   // kuin paalutus-sovelluksen rivien ryhmittelyssä (Y-läheisyys, ei tarkka
   // täsmäys, koska pöydän reuna/keskikohta voi vaihdella hieman). Koko
-  // rivin X-ulottuvuus näytetään, jotta asentaja näkee mistä kohtaa riviä
-  // vika löytyy — ei vain tiukkaa lähikuvaa pinnin ympäriltä.
+  // rivin X-ulottuvuus näytetään kokonaan (rivit ovat eripituisia, joten
+  // ei käytetä kiinteää ikkunaa), jotta asentaja näkee mistä kohtaa riviä
+  // vika löytyy.
   const ROW_Y_TOL = th * 1.5
   let rowMinX = Infinity, rowMaxX = -Infinity, rowMinY = Infinity, rowMaxY = -Infinity
   let foundRowTables = false
@@ -464,15 +465,30 @@ export function renderGroupMapImage(mapData, items) {
     minY = Math.min(...pins.map(p => p.y)); maxY = Math.max(...pins.map(p => p.y))
   }
 
-  // Pieni kiinteä hengitystila rivin ympärille (ei enää tarvitse kattaa
-  // koko riviä itse, koska rivin todellinen ulottuvuus on jo mukana yllä).
   const padX = th * 3
-  const padY = th * 3
   const svgX0 = Math.max(0, minX - padX)
-  const svgY0 = Math.max(0, minY - padY)
   const svgX1 = Math.min(mapData.W, maxX + padX)
-  const svgY1 = Math.min(mapData.H, maxY + padY)
-  const svgCropW = Math.max(1, svgX1 - svgX0), svgCropH = Math.max(1, svgY1 - svgY0)
+  const svgCropW = Math.max(1, svgX1 - svgX0)
+
+  // Pitkä rivi (100+ m) on hyvin kapea (pöydän syvyys vain muutama metri)
+  // — jos pystysuunta rajattaisiin tiukasti vain rivin syvyyteen, kuvasta
+  // tulisi käytännössä lukukelvoton ohut nauha PDF:ssä (kuvasuhde venyy
+  // äärimmäiseksi). Varmistetaan siis ETTEI kuvasuhde (leveys/korkeus)
+  // ylitä n. 9:1 — laajennetaan tarvittaessa pystysuuntaa rivin
+  // keskikohdan ympärille, jotta pinnit/pöydät pysyvät luettavina vaikka
+  // rivi olisi hyvin pitkä. Rivin koko pituus näkyy silti aina.
+  const MAX_ASPECT = 9
+  const minCropH = svgCropW / MAX_ASPECT
+  const rawCropH = Math.max(1, (maxY - minY) + th * 6) // rivin oma syvyys + pieni marginaali
+  const svgCropH = Math.max(minCropH, rawCropH)
+  const midY = (minY + maxY) / 2
+  let svgY0 = midY - svgCropH / 2
+  let svgY1 = midY + svgCropH / 2
+  // Siirretään ikkuna kartan sisään jos se osuisi reunan yli (ei
+  // pienennetä korkeutta, vain siirretään).
+  if (svgY0 < 0) { svgY1 -= svgY0; svgY0 = 0 }
+  if (svgY1 > mapData.H) { svgY0 -= (svgY1 - mapData.H); svgY1 = mapData.H }
+  svgY0 = Math.max(0, svgY0)
 
   const outW = 1400, outH = Math.round(outW * svgCropH / svgCropW)
   const canvas = document.createElement('canvas')
