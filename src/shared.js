@@ -105,18 +105,7 @@ export function findPinRow(mapData, pin) {
     })
     if (bestDist > th * 1.2) hitIdx = -1 // liian kaukana ollakseen luotettava arvaus
   }
-  if (hitIdx < 0) {
-    // TILAPÄINEN DEBUG — poistetaan kun vika on löytynyt.
-    const nearY = mapData.inserts
-      .map((ins, idx) => ({ idx, x: ins.x, y: ins.y, tw: ins.panels * PANEL_W_M * sxm }))
-      .filter(e => Math.abs(e.y - psy) < th * 2)
-      .sort((a, b) => Math.hypot(a.x - psx, a.y - psy) - Math.hypot(b.x - psx, b.y - psy))
-      .slice(0, 5)
-    console.log('[findPinRow] EI OSUMAA. pin=(' + psx.toFixed(1) + ',' + psy.toFixed(1) + ') th=' + th.toFixed(2))
-    console.log('[findPinRow] lähimmät 5 pöytää samalla Y-kaistalla (idx,x,y,tw):')
-    nearY.forEach(e => console.log('  idx=' + e.idx + ' x=' + e.x.toFixed(1) + ' y=' + e.y.toFixed(1) + ' tw=' + e.tw.toFixed(1) + ' etäisyysX=' + (psx - e.x).toFixed(1) + ' etäisyysY=' + (psy - e.y).toFixed(1)))
-    return null
-  }
+  if (hitIdx < 0) return null
   const hit = mapData.inserts[hitIdx]
 
   // 1b. Mitataan TODELLINEN rivi-väli tällä alueella heti, hit.x:n
@@ -286,14 +275,6 @@ export function findPinRow(mapData, pin) {
     })
     if (label2 && best2 <= maxLabelDist * 1.5) { best = best2; label = label2 }
   }
-  // TILAPÄINEN DEBUG — näyttää lopullisen (fallbackin jälkeisen) tuloksen
-  console.log('[findPinRow] pin=(' + psx.toFixed(1) + ',' + psy.toFixed(1) + ') hitIdx=' + hitIdx +
-    ' hit=(' + hit.x.toFixed(1) + ',' + hit.y.toFixed(1) + ') chainLen=' + chain.length +
-    ' chainX=[' + chain.map(e => e.left.toFixed(0) + '-' + e.right.toFixed(0)).join(',') + ']' +
-    ' targetX=' + targetX.toFixed(1) + ' targetY=' + targetY.toFixed(1) +
-    ' localPitch=' + localPitch.toFixed(2) + ' labelYTol=' + labelYTol.toFixed(2) +
-    ' strict->' + strictLabel + '@' + strictBest.toFixed(1) +
-    ' FINAL->' + label + '@' + best.toFixed(1))
   if (!label || best > maxLabelDist * 1.5) return null
 
   // Palautetaan myös koko rivin (ketjun) lohkojen indeksit — näitä tarvitaan
@@ -434,9 +415,10 @@ export function renderGroupMapImage(mapData, items) {
   // riviä tien vastakkaisilta puolilta). o.pin on normalisoidussa
   // (0..1) koordinaatistossa, sama muoto jota findPinRow odottaa.
   const rowInsertIdxSet = new Set()
-  items.forEach(o => {
+  const rowLabels = items.map(o => {
     const found = findPinRow(mapData, o.pin)
     if (found?.rowInsertIdxs?.length) found.rowInsertIdxs.forEach(i => rowInsertIdxSet.add(i))
+    return found ? found.label : null
   })
 
   let minX, maxX, minY, maxY
@@ -497,12 +479,13 @@ export function renderGroupMapImage(mapData, items) {
     mctx.closePath(); mctx.fill(); mctx.stroke()
   })
 
-  mapData.inserts.forEach((ins) => {
+  mapData.inserts.forEach((ins, idx) => {
     const tw = ins.panels * PANEL_W_M * sxm * kx
     const thpx = TABLE_DEPTH_M * sym * ky
-    mctx.fillStyle = 'rgba(26,47,204,0.18)'
-    mctx.strokeStyle = '#1a2fcc'
-    mctx.lineWidth = 0.6
+    const isHi = rowInsertIdxSet.has(idx)
+    mctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
+    mctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
+    mctx.lineWidth = isHi ? 1.4 : 0.6
     mctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
     mctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
   })
@@ -526,7 +509,7 @@ export function renderGroupMapImage(mapData, items) {
     mctx.fillText(String(i + 1), cx, cy + 4)
   })
 
-  return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), outW, outH }
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), outW, outH, rowLabels }
 }
 
 // Downscale + re-encode an image file straight away. Raw phone photos can be

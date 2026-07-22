@@ -8,7 +8,7 @@ import Dashboard from './Dashboard.jsx'
 import PileImport from './PileImport.jsx'
 import PaalutusView from './PaalutusView.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
-import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, renderGroupMapImage, compressImage } from './shared.js'
+import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage, compressImage } from './shared.js'
 
 const CATS = [
   'Paneeli rikkoutunut', 'Paneeli väärinpäin, yläreuna', 'Paneeli väärinpäin, alareuna',
@@ -494,12 +494,14 @@ export default function App() {
         // One combined map for every pin in this category, numbered to match
         // the list below.
         const withPin = g.items.filter(o => o.pin)
+        let rowLabelByItem = new Map()
         if (withPin.length && mapData) {
           if (y + 150 > 278) { doc.addPage(); y = 18 }
           doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(100, 100, 120)
           doc.text(T.location, M + 2, y); y += 4.5
           try {
-            const { dataUrl, outW, outH } = renderGroupMapImage(mapData, withPin)
+            const { dataUrl, outW, outH, rowLabels } = renderGroupMapImage(mapData, withPin)
+            if (rowLabels) withPin.forEach((o, i) => rowLabelByItem.set(o, rowLabels[i]))
             let pdfW = CW, pdfH = pdfW * (outH / outW)
             if (pdfH > 150) { pdfH = 150; pdfW = pdfH * (outW / outH) }
             if (y + pdfH > 278) { doc.addPage(); y = 18 }
@@ -515,8 +517,10 @@ export default function App() {
           const sevLabel = lang === 'en' ? (SEV_EN[o.sev] || o.sev) : o.sev
           const sc = sevCol[o.sev] || [80, 80, 80]
           const timeStr = o.createdAt ? '  ' + new Date(o.createdAt).toLocaleTimeString(T.dateLocale, { hour: '2-digit', minute: '2-digit' }) : ''
+          const rowLbl = rowLabelByItem.get(o)
+          const rowStr = rowLbl ? `  (${T.row} ${rowLbl})` : ''
           doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sc)
-          doc.text(`${idx + 1}. ${sevLabel}${timeStr}`, M + 2, y)
+          doc.text(`${idx + 1}. ${sevLabel}${rowStr}${timeStr}`, M + 2, y)
           y += 5.5
           if (o.note) {
             doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(60, 60, 60)
@@ -892,6 +896,14 @@ export default function App() {
                       onViewChange={view => setMapView(o.id, view)}
                       extraPins={quickAddId === o.id ? obs.filter(x => x.clonedFrom === o.id).map(x => x.pin) : []}
                     />
+                    {o.pin && (() => {
+                      const r = findPinRow(mapData, o.pin)
+                      return r ? (
+                        <div style={{ marginTop: 6, fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
+                          📍 Havaittu rivi: {r.label}
+                        </div>
+                      ) : null
+                    })()}
                     {o.pin && (
                       <div style={{ marginTop: 8 }}>
                         {quickAddId === o.id ? (
