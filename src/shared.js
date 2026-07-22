@@ -429,38 +429,34 @@ export function renderGroupMapImage(mapData, items) {
 
   const pins = items.map(o => ({ x: o.pin.x * mapData.W, y: o.pin.y * mapData.H }))
 
-  // Rivin tunnistus: etsitään KAIKKI pöydät (inserts) jotka ovat samalla
-  // Y-korkeudella (samalla rivillä) kuin jokin pinneistä — sama periaate
-  // kuin paalutus-sovelluksen rivien ryhmittelyssä (Y-läheisyys, ei tarkka
-  // täsmäys, koska pöydän reuna/keskikohta voi vaihdella hieman). Koko
-  // rivin X-ulottuvuus näytetään kokonaan (rivit ovat eripituisia, joten
-  // ei käytetä kiinteää ikkunaa), jotta asentaja näkee mistä kohtaa riviä
-  // vika löytyy.
-  const ROW_Y_TOL = th * 1.5
-  let rowMinX = Infinity, rowMaxX = -Infinity, rowMinY = Infinity, rowMaxY = -Infinity
-  let foundRowTables = false
-  pins.forEach(pin => {
-    mapData.inserts.forEach(ins => {
-      if (Math.abs(ins.y - pin.y) < ROW_Y_TOL) {
-        const tw = ins.panels * PANEL_W_M * sxm
-        rowMinX = Math.min(rowMinX, ins.x)
-        rowMaxX = Math.max(rowMaxX, ins.x + tw)
-        rowMinY = Math.min(rowMinY, ins.y)
-        rowMaxY = Math.max(rowMaxY, ins.y + th)
-        foundRowTables = true
-      }
-    })
+  // Rivin tunnistus: käytetään SAMAA huolella hiottua ketjutuslogiikkaa
+  // (findPinRow, tässä samassa tiedostossa) jota käytetään jo muualla
+  // rivinumeron päättelyyn napautuksesta — se osaa jo oikein ketjuttaa
+  // rivin pöytälohkot yhteen ja pysähtyä tien/aluerajan kohdalla, toisin
+  // kuin pelkkä Y-läheisyys (joka voisi vahingossa yhdistää kaksi eri
+  // riviä tien vastakkaisilta puolilta). o.pin on normalisoidussa
+  // (0..1) koordinaatistossa, sama muoto jota findPinRow odottaa.
+  const rowInsertIdxSet = new Set()
+  items.forEach(o => {
+    const found = findPinRow(mapData, o.pin)
+    if (found?.rowInsertIdxs?.length) found.rowInsertIdxs.forEach(i => rowInsertIdxSet.add(i))
   })
 
   let minX, maxX, minY, maxY
-  if (foundRowTables) {
+  if (rowInsertIdxSet.size > 0) {
+    const chainInserts = [...rowInsertIdxSet].map(i => mapData.inserts[i])
+    const rowMinX = Math.min(...chainInserts.map(e => e.x))
+    const rowMaxX = Math.max(...chainInserts.map(e => e.x + e.panels * PANEL_W_M * sxm))
+    const rowMinY = Math.min(...chainInserts.map(e => e.y))
+    const rowMaxY = Math.max(...chainInserts.map(e => e.y + th))
     minX = Math.min(rowMinX, ...pins.map(p => p.x))
     maxX = Math.max(rowMaxX, ...pins.map(p => p.x))
     minY = Math.min(rowMinY, ...pins.map(p => p.y))
     maxY = Math.max(rowMaxY, ...pins.map(p => p.y))
   } else {
-    // Varalla: ei löytynyt yhtään pöytää samalta riviltä (esim. testipinni
-    // ilman oikeaa sijaintia) — näytetään ainakin pinnien oma sijainti.
+    // Varalla: findPinRow ei löytänyt ketjutettavaa riviä (esim. testipinni
+    // ilman oikeaa sijaintia, tai osui polygonina piirrettyyn alueeseen)
+    // — näytetään ainakin pinnien oma sijainti.
     minX = Math.min(...pins.map(p => p.x)); maxX = Math.max(...pins.map(p => p.x))
     minY = Math.min(...pins.map(p => p.y)); maxY = Math.max(...pins.map(p => p.y))
   }
