@@ -18,6 +18,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
   const [transform, setTransform] = useState({ scale: 1, tx: 0, ty: 0 })
   const stateRef = useRef({ scale: 1, tx: 0, ty: 0 })
   const autoCenteredRef = useRef(false) // estää GPS-keskityksen toistumisen/ohittamisen käyttäjän oman panoroinnin jälkeen
+  const [followMe, setFollowMe] = useState(false) // "Seuraa sijaintia" -tila: kartta pysyy keskitettynä GPS-sijaintiin liikkuessa
 
   const { W, H, pvAreas, roads, boundaries, inserts, panelAreas = [], rowNumbers, minX, minY, maxX, maxY } = mapData
 
@@ -105,12 +106,30 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
     return { ...s, tx, ty }
   }, [W, H])
 
+  // "Seuraa sijaintia" -tila: kun päällä, kartta pysyy jatkuvasti
+  // keskitettynä GPS-sijaintiin joka kerta kun se päivittyy — nykyinen
+  // zoomaus säilyy ennallaan, vain sijainti (tx/ty) päivittyy. Ei siis
+  // tarvitse itse raahata/zoomailla karttaa koko ajan kävellessä.
+  // Käyttäjän oma panorointi (onTouchStart/onMouseDown alempana)
+  // sammuttaa tämän automaattisesti.
+  useEffect(() => {
+    if (!followMe || !gpsCoords) return
+    const el = containerRef.current
+    if (!el) return
+    const s = stateRef.current
+    const cw = el.clientWidth, ch = el.clientHeight
+    const gx = gpsCoords.x * W, gy = gpsCoords.y * H
+    applyTransform(clamp({ scale: s.scale, tx: cw / 2 - gx * s.scale, ty: ch / 2 - gy * s.scale }))
+  }, [followMe, gpsCoords, W, H, clamp, applyTransform])
+
   // Touch handling
   const touchRef = useRef(null)
 
   const onTouchStart = useCallback((e) => {
+    if (e.target.tagName === 'BUTTON') return // älä käynnistä panorointia/sammuta seurantaa napin painalluksesta
     e.preventDefault()
     autoCenteredRef.current = true // käyttäjä koski karttaa itse — GPS-autokeskitys ei saa enää yrittää vetää näkymää
+    setFollowMe(false) // manuaalinen panorointi sammuttaa "seuraa sijaintia" -tilan
     const s = stateRef.current
     if (e.touches.length === 1) {
       touchRef.current = {
@@ -191,6 +210,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
   const onMouseDown = useCallback((e) => {
     if (e.target.tagName === 'BUTTON') return
     autoCenteredRef.current = true
+    setFollowMe(false) // manuaalinen panorointi sammuttaa "seuraa sijaintia" -tilan
     const s = stateRef.current
     mouseRef.current = { startX: e.clientX, startY: e.clientY, tx: s.tx, ty: s.ty, moved: false }
   }, [])
@@ -486,6 +506,25 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
           <button onClick={(e) => { e.stopPropagation(); zoom(1.5) }} style={zoomBtnStyle}>+</button>
           <button onClick={(e) => { e.stopPropagation(); zoom(0.67) }} style={zoomBtnStyle}>−</button>
         </div>
+
+        {/* "Seuraa sijaintia" -nappi — kartta pysyy keskitettynä GPS-
+            sijaintiin liikkuessa, ei tarvitse itse raahata/zoomailla koko
+            ajan. Näkyy vain jos GPS-sijainti on ylipäätään saatavilla. */}
+        {gpsCoords && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setFollowMe(f => !f) }}
+            title="Seuraa sijaintia"
+            style={{
+              ...zoomBtnStyle,
+              position: 'absolute', bottom: 8, left: 8, zIndex: 10,
+              background: followMe ? '#1a2fcc' : 'rgba(255,255,255,0.92)',
+              color: followMe ? '#fff' : '#333',
+              borderColor: followMe ? '#1a2fcc' : '#ccc',
+            }}
+          >
+            📍
+          </button>
+        )}
       </div>
 
       {/* Bottom bar */}

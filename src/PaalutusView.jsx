@@ -2,7 +2,7 @@
 // Paalutajien oma näkymä — TÄYSIN ERILLINEN InstallerView.jsx:stä (eri
 // käyttäjäryhmä, eri kirjautuminen: pile_operators-taulu, ei installers).
 // Avataan osoitteella ?paalutus.
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { sb } from './supabaseClient.js'
 import { latLngToTM35FIN } from './coords.js'
 import { KNOWN_SITES } from './shared.js'
@@ -45,14 +45,18 @@ export function typeLabel(code) {
 // ja kapea). Paalu numeroitu samalla numerolla kuin listassa alla, väritetty
 // tilan mukaan, ja tapista voi avata saman muokkauksen kuin listasta.
 function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
-  if (!piles || piles.length === 0) return null
-  const xs = piles.map(p => p.x), ys = piles.map(p => p.y)
+  const scrollRef = useRef(null)
+  const [followMe, setFollowMe] = useState(true) // oletuksena päällä — vierittää automaattisesti omaan sijaintiin
+
+  const hasPiles = !!(piles && piles.length > 0)
+  const xs = hasPiles ? piles.map(p => p.x) : [0]
+  const ys = hasPiles ? piles.map(p => p.y) : [0]
   // Näytetään oma sijainti kartalla vain jos se on riittävän lähellä riviä
   // (esim. 300m sisällä) — muuten se venyttäisi koko kartan valtaosin
   // tyhjäksi tilaksi jos GPS-piste on kaukana (esim. testatessa sisällä).
   const MAX_LOCATION_DIST_M = 300
   let showLocation = false
-  if (myLocation) {
+  if (hasPiles && myLocation) {
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2
     const cy = (Math.min(...ys) + Math.max(...ys)) / 2
     const dist = Math.hypot(myLocation.x - cx, myLocation.y - cy)
@@ -82,37 +86,75 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
   const tx = x => offX + (x - minX) * PX_PER_M
   const ty = y => offY + (drawH - (y - minY) * PX_PER_M) // pohjoinen (suurempi Y) ylöspäin
 
-  const editingPile = piles.find(p => p.id === editingId)
+  const editingPile = hasPiles ? piles.find(p => p.id === editingId) : null
   const editingIdx = editingPile ? piles.indexOf(editingPile) : -1
 
+  // "Seuraa sijaintia" -tila: vierittää kartan automaattisesti niin että
+  // oma GPS-sijainti pysyy näkyvissä liikkuessa pitkän rivin vieressä —
+  // ei tarvitse itse pyyhkäistä karttaa koko ajan. Käyttäjän oma
+  // vieritys (onScroll alla) sammuttaa tämän, "🎯"-nappi käynnistää sen
+  // uudelleen. Hook kutsutaan aina (ei ehdollisesti) — sisällä ohitetaan
+  // jos ei ole vielä dataa/sijaintia.
+  useEffect(() => {
+    if (!hasPiles || !followMe || !showLocation) return
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTo({ left: Math.max(0, tx(myLocation.x) - el.clientWidth / 2), behavior: 'smooth' })
+  }, [followMe, hasPiles, showLocation, myLocation?.x, myLocation?.y])
+
+  if (!hasPiles) return null
+
   return (
-    <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 260, overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch', marginBottom: 12, borderRadius: 8, background: '#eef4ec' }}>
-      <svg viewBox={`0 0 ${boxW} ${boxH}`} width={boxW} height={boxH} style={{ display: 'block' }}>
-        <text x={boxW - 8} y={16} textAnchor="end" fontSize="11" fill="#666">N ↑</text>
-        {piles.map((p, idx) => {
-          const isEditing = editingId === p.id
-          const hasPullTest = p.pull_test_kn != null
-          const color = p.status === 'done' ? '#1a7a45' : '#999'
-          return (
-            <g key={p.id} onClick={() => onSelect(p)} style={{ cursor: 'pointer' }}>
-              {isEditing && <circle cx={tx(p.x)} cy={ty(p.y)} r={9} fill="none" stroke="#1a2fcc" strokeWidth={2} />}
-              {hasPullTest && <circle cx={tx(p.x)} cy={ty(p.y)} r={8} fill="none" stroke="#d63030" strokeWidth={2} />}
-              <circle cx={tx(p.x)} cy={ty(p.y)} r={5} fill={color} stroke="#fff" strokeWidth={1} />
+    <div style={{ position: 'relative' }}>
+      <div
+        ref={scrollRef}
+        onWheel={() => setFollowMe(false)}
+        onTouchMove={() => setFollowMe(false)}
+        style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 260, overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch', marginBottom: 12, borderRadius: 8, background: '#eef4ec' }}
+      >
+        <svg viewBox={`0 0 ${boxW} ${boxH}`} width={boxW} height={boxH} style={{ display: 'block' }}>
+          <text x={boxW - 8} y={16} textAnchor="end" fontSize="11" fill="#666">N ↑</text>
+          {piles.map((p, idx) => {
+            const isEditing = editingId === p.id
+            const hasPullTest = p.pull_test_kn != null
+            const color = p.status === 'done' ? '#1a7a45' : '#999'
+            return (
+              <g key={p.id} onClick={() => onSelect(p)} style={{ cursor: 'pointer' }}>
+                {isEditing && <circle cx={tx(p.x)} cy={ty(p.y)} r={9} fill="none" stroke="#1a2fcc" strokeWidth={2} />}
+                {hasPullTest && <circle cx={tx(p.x)} cy={ty(p.y)} r={8} fill="none" stroke="#d63030" strokeWidth={2} />}
+                <circle cx={tx(p.x)} cy={ty(p.y)} r={5} fill={color} stroke="#fff" strokeWidth={1} />
+              </g>
+            )
+          })}
+          {editingIdx >= 0 && (
+            <text x={tx(editingPile.x)} y={ty(editingPile.y) - 13} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#1a2fcc">
+              #{editingIdx + 1}
+            </text>
+          )}
+          {showLocation && (
+            <g>
+              <circle cx={tx(myLocation.x)} cy={ty(myLocation.y)} r={9} fill="#1a2fcc" fillOpacity={0.2} />
+              <circle cx={tx(myLocation.x)} cy={ty(myLocation.y)} r={4} fill="#1a2fcc" stroke="#fff" strokeWidth={1.5} />
             </g>
-          )
-        })}
-        {editingIdx >= 0 && (
-          <text x={tx(editingPile.x)} y={ty(editingPile.y) - 13} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#1a2fcc">
-            #{editingIdx + 1}
-          </text>
-        )}
-        {showLocation && (
-          <g>
-            <circle cx={tx(myLocation.x)} cy={ty(myLocation.y)} r={9} fill="#1a2fcc" fillOpacity={0.2} />
-            <circle cx={tx(myLocation.x)} cy={ty(myLocation.y)} r={4} fill="#1a2fcc" stroke="#fff" strokeWidth={1.5} />
-          </g>
-        )}
-      </svg>
+          )}
+        </svg>
+      </div>
+      {showLocation && (
+        <button
+          onClick={() => setFollowMe(f => !f)}
+          title="Seuraa sijaintia"
+          style={{
+            position: 'absolute', bottom: 8, right: 8, zIndex: 10,
+            width: 32, height: 32, borderRadius: 7, fontSize: 15,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: followMe ? '1px solid #1a2fcc' : '1px solid #ccc',
+            background: followMe ? '#1a2fcc' : 'rgba(255,255,255,0.92)',
+            color: followMe ? '#fff' : '#333',
+          }}
+        >
+          📍
+        </button>
+      )}
     </div>
   )
 }
