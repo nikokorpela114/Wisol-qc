@@ -16,7 +16,8 @@ const CATS = [
   'Paneelikiinnikkeiden kiristysmomentit vajaat', 'Kiskot tasaamatta', 'Niittejä puuttuu',
   'Kannake vääntynyt tai rikki', 'DC-kouru katkaisematta', 'Tupla poraruuvit puuttuvat',
   'Poraruuvi puuttuu', 'Koropalojen suoristus', 'Shimmi levy puuttuu',
-  'Paalu pultti löysällä', 'Paalu pultti puuttuu', 'Muu asia'
+  'Paalu pultti löysällä', 'Paalu pultti puuttuu', 'Siivous', 'Ristituki puuttuu',
+  'Ristituki rauta tasaamatta', 'Suojakansi puuttuu', 'Muu asia'
 ]
 
 let idCounter = 0
@@ -898,20 +899,11 @@ export default function App() {
                     />
                     {o.pin && (() => {
                       const r = findPinRow(mapData, o.pin)
-                      return (
-                        <div>
-                          {r?.label && (
-                            <div style={{ marginTop: 6, fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
-                              📍 Havaittu rivi: {r.label}
-                            </div>
-                          )}
-                          {r?.debug && (
-                            <div style={{ marginTop: 4, fontSize: 10, color: '#999', fontFamily: 'monospace', wordBreak: 'break-word' }}>
-                              🐞 {r.debug}
-                            </div>
-                          )}
+                      return r ? (
+                        <div style={{ marginTop: 6, fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
+                          📍 Havaittu rivi: {r.label}
                         </div>
-                      )
+                      ) : null
                     })()}
                     {o.pin && (
                       <div style={{ marginTop: 8 }}>
