@@ -429,19 +429,45 @@ export function renderGroupMapImage(mapData, items) {
 
   const pins = items.map(o => ({ x: o.pin.x * mapData.W, y: o.pin.y * mapData.H }))
 
-  // Automaattinen rivintunnistus/-korostus poistettu käytöstä kokonaan
-  // (osoittautui epäluotettavaksi paikoin, ks. keskustelu) — kartta
-  // näyttää nyt vain numeroidut pinnit ja niitä ympäröivät pöydät, ilman
-  // minkäänlaista "tämä on oikea rivi" -päättelyä tai -korostusta.
-  let minX = Math.min(...pins.map(p => p.x)), maxX = Math.max(...pins.map(p => p.x))
-  let minY = Math.min(...pins.map(p => p.y)), maxY = Math.max(...pins.map(p => p.y))
+  // Rivin tunnistus: etsitään KAIKKI pöydät (inserts) jotka ovat samalla
+  // Y-korkeudella (samalla rivillä) kuin jokin pinneistä — sama periaate
+  // kuin paalutus-sovelluksen rivien ryhmittelyssä (Y-läheisyys, ei tarkka
+  // täsmäys, koska pöydän reuna/keskikohta voi vaihdella hieman). Koko
+  // rivin X-ulottuvuus näytetään, jotta asentaja näkee mistä kohtaa riviä
+  // vika löytyy — ei vain tiukkaa lähikuvaa pinnin ympäriltä.
+  const ROW_Y_TOL = th * 1.5
+  let rowMinX = Infinity, rowMaxX = -Infinity, rowMinY = Infinity, rowMaxY = -Infinity
+  let foundRowTables = false
+  pins.forEach(pin => {
+    mapData.inserts.forEach(ins => {
+      if (Math.abs(ins.y - pin.y) < ROW_Y_TOL) {
+        const tw = ins.panels * PANEL_W_M * sxm
+        rowMinX = Math.min(rowMinX, ins.x)
+        rowMaxX = Math.max(rowMaxX, ins.x + tw)
+        rowMinY = Math.min(rowMinY, ins.y)
+        rowMaxY = Math.max(rowMaxY, ins.y + th)
+        foundRowTables = true
+      }
+    })
+  })
 
-  // Reilu kiinteä marginaali pisteiden ympärille (aiemmin rajaus laajeni
-  // koko havaitun rivin mukaan — nyt sitä ei ole, joten käytetään
-  // pöydän mittoihin sidottua kiinteää marginaalia jotta pisteiden
-  // ympäriltä näkyy edes jonkin verran kontekstia).
-  const padX = Math.max(th * 10, (maxX - minX) * 0.15)
-  const padY = Math.max(th * 3, (maxY - minY) * 0.35)
+  let minX, maxX, minY, maxY
+  if (foundRowTables) {
+    minX = Math.min(rowMinX, ...pins.map(p => p.x))
+    maxX = Math.max(rowMaxX, ...pins.map(p => p.x))
+    minY = Math.min(rowMinY, ...pins.map(p => p.y))
+    maxY = Math.max(rowMaxY, ...pins.map(p => p.y))
+  } else {
+    // Varalla: ei löytynyt yhtään pöytää samalta riviltä (esim. testipinni
+    // ilman oikeaa sijaintia) — näytetään ainakin pinnien oma sijainti.
+    minX = Math.min(...pins.map(p => p.x)); maxX = Math.max(...pins.map(p => p.x))
+    minY = Math.min(...pins.map(p => p.y)); maxY = Math.max(...pins.map(p => p.y))
+  }
+
+  // Pieni kiinteä hengitystila rivin ympärille (ei enää tarvitse kattaa
+  // koko riviä itse, koska rivin todellinen ulottuvuus on jo mukana yllä).
+  const padX = th * 3
+  const padY = th * 3
   const svgX0 = Math.max(0, minX - padX)
   const svgY0 = Math.max(0, minY - padY)
   const svgX1 = Math.min(mapData.W, maxX + padX)
