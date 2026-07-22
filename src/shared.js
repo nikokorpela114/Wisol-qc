@@ -162,9 +162,12 @@ export function findPinRow(mapData, pin) {
   // väärään, lähimpään sattumanvaraiseen numeroon. Aiempi "455 yksikön
   // jättiketju" -bugi ei itse asiassa johtunut suuresta gapTol:sta vaan
   // PÄÄLLEKKÄISISTÄ/duplikoituneista DXF-lohkoista — se on jo erikseen
-  // estetty alla olevalla "gap >= -1" tarkistuksella, joten gapTol voi
-  // taas olla reilusti isompi ilman että sama bugi palaa.
-  const gapTol = 45 * sxm
+  // estetty alla olevalla "gap >= -100" tarkistuksella, joten gapTol voi
+  // taas olla reilusti isompi ilman että sama bugi palaa. Nostettu 45:stä
+  // 100:aan kun oikealla debug-datalla (ks. keskustelu) havaittiin
+  // tiheästi rakennetulla A5-alueella normaaleja, laillisia n. 80-140m
+  // aukkoja saman rivin sisällä jotka 45m raja katkaisi virheellisesti.
+  const gapTol = 100 * sxm
   const rowY = hit.y + localPitch / 2
 
   // Tarkistaa kulkeeko jokin "raja-viiva" kahden pisteen välistä. Tähän
@@ -260,15 +263,20 @@ export function findPinRow(mapData, pin) {
   for (let i = hitPos - 1; i >= 0; i--) {
     const edge = chain[0].left
     const gap = edge - sameY[i].right
-    // gap < -1: lohkot ovat selvästi päällekkäin (esim. DXF:n duplikoitu/
-    // limittyvä data) — ei ketjuteta tällaisen läpi.
-    if (gap >= -1 && gap <= gapTol && canBridgeGap(sameY[i].right, edge)) chain.unshift(sameY[i])
+    // gap < -100: lohkot ovat selvästi päällekkäin (esim. DXF:n
+    // duplikoitu/limittyvä data) — ei ketjuteta tällaisen läpi. Raja
+    // nostettu aiemmasta -1:stä, koska osa pöytätyypeistä (esim. "2P77")
+    // laskee leveytensä hieman todellista suuremmaksi (panels*leveys ei
+    // täsmää täydellisesti todelliseen kehysleveyteen), mikä näkyi
+    // pieninä negatiivisina aukkoina (esim. -52, -21) vaikka pöydät
+    // olivat oikeasti samaa riviä — nämä eivät ole oikeita duplikaatteja.
+    if (gap >= -100 && gap <= gapTol && canBridgeGap(sameY[i].right, edge)) chain.unshift(sameY[i])
     else { dbg.push(`vasen pysähtyi: gap=${Math.round(gap)} gapTol=${Math.round(gapTol)}`); break }
   }
   for (let i = hitPos + 1; i < sameY.length; i++) {
     const edge = chain[chain.length - 1].right
     const gap = sameY[i].left - edge
-    if (gap >= -1 && gap <= gapTol && canBridgeGap(edge, sameY[i].left)) chain.push(sameY[i])
+    if (gap >= -100 && gap <= gapTol && canBridgeGap(edge, sameY[i].left)) chain.push(sameY[i])
     else { dbg.push(`oikea pysähtyi: gap=${Math.round(gap)} gapTol=${Math.round(gapTol)}`); break }
   }
   dbg.push(`ketju: ${chain.length}kpl, left=${Math.round(chain[0].left)} right=${Math.round(chain[chain.length - 1].right)}`)
