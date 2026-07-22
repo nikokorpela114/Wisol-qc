@@ -167,7 +167,7 @@ export function findPinRow(mapData, pin) {
   // 100:aan kun oikealla debug-datalla (ks. keskustelu) havaittiin
   // tiheästi rakennetulla A5-alueella normaaleja, laillisia n. 80-140m
   // aukkoja saman rivin sisällä jotka 45m raja katkaisi virheellisesti.
-  const gapTol = 100 * sxm
+  const gapTol = 110 * sxm
   const rowY = hit.y + localPitch / 2
 
   // Tarkistaa kulkeeko jokin "raja-viiva" kahden pisteen välistä. Tähän
