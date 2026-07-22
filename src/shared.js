@@ -275,7 +275,25 @@ export function findPinRow(mapData, pin) {
     })
     if (label2 && best2 <= maxLabelDist * 1.5) { best = best2; label = label2 }
   }
-  if (!label || best > maxLabelDist * 1.5) return null
+  // Viimeinen varajärjestelmä: jos ketjuun perustuva kohdepiste (targetX)
+  // ei löydä mitään edes löysemmällä haulla — esim. koska ketjutus
+  // katkesi kesken Aluejako-rajaviivan kohdalla ja targetX jäi siksi
+  // väärään, "katkaistuun" kohtaan kauas oikeasta numerolapusta —
+  // kokeillaan vielä hakea lähin numero suoraan NAPATUN PÖYDÄN OMAN
+  // sijainnin (hit.x) perusteella sen sijaan että luovutettaisiin
+  // kokonaan. Parempi näyttää lähin uskottava numero (mahdollisesti
+  // hieman epätarkka) kuin jättää käyttäjä täysin tyhjän päälle.
+  if (!label || best > maxLabelDist * 1.5) {
+    const hitCenterY = hit.y + th / 2
+    let best3 = Infinity, label3 = null
+    mapData.rowNumbers.forEach(t => {
+      if (Math.abs(t.y - hitCenterY) > labelYTol * 1.5) return
+      const d = Math.hypot(t.x - hit.x, t.y - hitCenterY)
+      if (d < best3) { best3 = d; label3 = t.text }
+    })
+    if (label3 && best3 <= maxLabelDist * 2) { best = best3; label = label3 }
+  }
+  if (!label || best > maxLabelDist * 2) return null
 
   // Palautetaan myös koko rivin (ketjun) lohkojen indeksit — näitä tarvitaan
   // kun halutaan korostaa/rajata koko rivi eikä vain sitä yhtä lohkoa johon
