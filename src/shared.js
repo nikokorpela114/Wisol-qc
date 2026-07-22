@@ -105,7 +105,18 @@ export function findPinRow(mapData, pin) {
     })
     if (bestDist > th * 1.2) hitIdx = -1 // liian kaukana ollakseen luotettava arvaus
   }
-  if (hitIdx < 0) return null
+  if (hitIdx < 0) {
+    // TILAPÄINEN DEBUG — poistetaan kun vika on löytynyt.
+    const nearY = mapData.inserts
+      .map((ins, idx) => ({ idx, x: ins.x, y: ins.y, tw: ins.panels * PANEL_W_M * sxm }))
+      .filter(e => Math.abs(e.y - psy) < th * 2)
+      .sort((a, b) => Math.hypot(a.x - psx, a.y - psy) - Math.hypot(b.x - psx, b.y - psy))
+      .slice(0, 5)
+    console.log('[findPinRow] EI OSUMAA. pin=(' + psx.toFixed(1) + ',' + psy.toFixed(1) + ') th=' + th.toFixed(2))
+    console.log('[findPinRow] lähimmät 5 pöytää samalla Y-kaistalla (idx,x,y,tw):')
+    nearY.forEach(e => console.log('  idx=' + e.idx + ' x=' + e.x.toFixed(1) + ' y=' + e.y.toFixed(1) + ' tw=' + e.tw.toFixed(1) + ' etäisyysX=' + (psx - e.x).toFixed(1) + ' etäisyysY=' + (psy - e.y).toFixed(1)))
+    return null
+  }
   const hit = mapData.inserts[hitIdx]
 
   // 1b. Mitataan TODELLINEN rivi-väli tällä alueella heti, hit.x:n
