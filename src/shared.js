@@ -343,17 +343,46 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
 
   const psx = pin.x * mapData.W, psy = pin.y * mapData.H
 
-  // Automaattinen rivintunnistus/-korostus poistettu käytöstä kokonaan
-  // (osoittautui epäluotettavaksi paikoin, ks. keskustelu) — kartta
-  // näyttää nyt vain pinnin ja sitä ympäröivät pöydät kiinteän kokoisena
-  // rajauksena, ilman minkäänlaista "tämä on oikea rivi" -päättelyä tai
-  // -korostusta.
-  const cropHalfW = th * 12, cropHalfH = th * 4
-  const minX = psx - cropHalfW, maxX = psx + cropHalfW
-  const minY = psy - cropHalfH, maxY = psy + cropHalfH
+  // Rivintunnistus/korostus PALAUTETTU käyttöön — käytetään samaa
+  // huolella hiottua findPinRow-logiikkaa jota renderGroupMapImage jo
+  // käyttää onnistuneesti (ketjuttaa rivin pöytälohkot yhteen, pysähtyy
+  // tien/aluerajan kohdalla). Aiempi "poistettu epäluotettavana" -päätös
+  // perustui vanhentuneeseen tilanteeseen; findPinRow on sittemmin saanut
+  // useita järkevyystarkistuksia (localPitch-sanity, polygonialueiden
+  // fallback, oikea jana-jana-leikkaustesti) jotka tekevät siitä
+  // luotettavan myös tähän käyttöön.
+  const info = findPinRow(mapData, pin)
+  const highlightIdx = new Set(info ? info.rowInsertIdxs : [])
 
-  const svgX0 = Math.max(0, minX), svgX1 = Math.min(mapData.W, maxX)
-  const svgY0 = Math.max(0, minY), svgY1 = Math.min(mapData.H, maxY)
+  // Crop around the pin's ENTIRE detected row (every segment of it), not
+  // just a fixed radius around the pin point — a tight radius-only crop
+  // showed a single anonymous colour block with no row number and no way
+  // to tell where along a long row the pin actually sat. Showing the whole
+  // row (plus its number label) instead always gives that context. Jos
+  // riviä ei tunnistettu (esim. pinni osuu alueeseen jolla ei ole
+  // ketjutettavaa rivirakennetta), käytetään varalla kiinteää rajausta
+  // pinnin ympärillä.
+  let minX, maxX, minY, maxY
+  if (highlightIdx.size > 0) {
+    minX = psx; maxX = psx; minY = psy; maxY = psy
+    highlightIdx.forEach(idx => {
+      const ins = mapData.inserts[idx]
+      const left = ins.x, right = ins.x + ins.panels * PANEL_W_M * sxm
+      if (left < minX) minX = left
+      if (right > maxX) maxX = right
+      if (ins.y < minY) minY = ins.y
+      if (ins.y + th > maxY) maxY = ins.y + th
+    })
+  } else {
+    const cropHalfW = th * 12, cropHalfH = th * 4
+    minX = psx - cropHalfW; maxX = psx + cropHalfW
+    minY = psy - cropHalfH; maxY = psy + cropHalfH
+  }
+
+  const padX = Math.max(6 * sxm, (maxX - minX) * 0.05)
+  const padY = Math.max(9 * sym, (maxY - minY) * 0.2)
+  const svgX0 = Math.max(0, minX - padX), svgX1 = Math.min(mapData.W, maxX + padX)
+  const svgY0 = Math.max(0, minY - padY), svgY1 = Math.min(mapData.H, maxY + padY)
   const svgCropW = Math.max(1, svgX1 - svgX0), svgCropH = Math.max(1, svgY1 - svgY0)
 
   const outH = Math.round(outW * svgCropH / svgCropW)
@@ -370,14 +399,15 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
     ctx.closePath(); ctx.fill(); ctx.stroke()
   })
 
-  mapData.inserts.forEach((ins) => {
+  mapData.inserts.forEach((ins, idx) => {
     const right = ins.x + ins.panels * PANEL_W_M * sxm
     const left = ins.x
     if (right < svgX0 || left > svgX1 || ins.y + th < svgY0 || ins.y > svgY1) return // skip off-screen tables
     const tw = ins.panels * PANEL_W_M * sxm * kx, thpx = TABLE_DEPTH_M * sym * ky
-    ctx.fillStyle = 'rgba(26,47,204,0.18)'
-    ctx.strokeStyle = '#1a2fcc'
-    ctx.lineWidth = 0.5
+    const isHi = highlightIdx.has(idx)
+    ctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
+    ctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
+    ctx.lineWidth = isHi ? 1.4 : 0.5
     ctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
     ctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
   })
