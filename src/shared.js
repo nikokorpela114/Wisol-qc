@@ -220,22 +220,20 @@ export function findPinRow(mapData, pin) {
     return label
   }
 
-  // Voiko ketju jatkua tämän aukon yli? Sekä tiet ETTÄ Aluejako-rajat
-  // katkaisevat vain jos aukon MOLEMMIN puolin ei löydy samaa
-  // rivinumeroa. Aiemmin Aluejako katkaisi aina automaattisesti, mutta
-  // se osoittautui liian herkäksi — Aluejako-rajan tarkka, usein mutkikas
-  // geometria saattoi katkaista saman rivin keskeltä vaikka rivi jatkuu
-  // fyysisesti yhtenäisenä samalla numerolla (ks. keskustelu, A6/
-  // Logistiikka-alue). Sama numerotarkistus toimii silti turvaverkkona
-  // aidosti eri alueiden välillä: kahden itsenäisesti numeroidun alueen
-  // rivinumerot eivät käytännössä koskaan täsmää sattumalta samassa
-  // kohdassa, joten ne pysyvät edelleen erillään ilman erillistä
-  // "Aluejako aina katkaisee" -sääntöä. Jos numeroa ei löydy
+  // Voiko ketju jatkua tämän aukon yli? Aluejako-rajat (eri numeroidut
+  // alueet, esim. Logistiikka/A6) katkaisevat AINA — todettu (ks.
+  // keskustelu), että rivinumerot TOISTUVAT eri alueilla (esim. "63" löytyy
+  // sekä Läntinen suora- että Käsivarsi- että Logistiikka-alueilta), joten
+  // "sama numero molemmin puolin" ei ole luotettava tapa päätellä onko
+  // kyseessä sama alue — se johti vääriin yhdistymisiin naapurialueiden
+  // välillä. Pelkkä tie sen sijaan katkaisee vain jos aukon MOLEMMIN
+  // puolin ei löydy samaa rivinumeroa (pieni tien/kulkuväylän ylitys
+  // kesken rivin ei aina tarkoita eri riviä). Jos numeroa ei löydy
   // jommaltakummalta puolelta, ollaan varovaisia ja katkaistaan
   // (turvallinen oletus).
   const canBridgeGap = (xA, xB) => {
-    const crossesAny = crossesLines(mapData.roads, xA, xB) || crossesLines(mapData.aluejako || [], xA, xB)
-    if (!crossesAny) return true
+    if (crossesLines(mapData.aluejako || [], xA, xB)) return false
+    if (!crossesLines(mapData.roads, xA, xB)) return true
     const labelA = nearestRowLabel(xA), labelB = nearestRowLabel(xB)
     return !!(labelA && labelB && labelA === labelB)
   }
