@@ -168,14 +168,18 @@ export function findPinRow(mapData, pin) {
   const rowY = hit.y + localPitch / 2
 
   // Tarkistaa kulkeeko jokin "raja-viiva" kahden pisteen välistä. Tähän
-  // lasketaan sekä tiet (mapData.roads) että aluerajat — dxfParser.js lukee
-  // DXF:n "Aluejako"-tason (eri numeroitujen alueiden väliset rajaviivat,
-  // esim. A5/A6-alueiden raja) samaan pvAreas-joukkoon kuin itse
-  // paneelialueiden ulkoreunat, koska molemmat ovat "alue"-tyyppisiä
-  // polygoneja DXF:ssä. Ilman tätä kaksi vierekkäistä mutta itsenäisesti
-  // numeroitua aluetta (esim. rivit 61/63/65 alueella A5 ja 70/72/74
-  // alueella A6) saattoivat ketjuuntua samaksi riviksi, koska niiden
-  // välissä oleva aluerajaviiva ei ollut "tie" eikä siis pysäyttänyt ketjua.
+  // lasketaan sekä tiet (mapData.roads) että Aluejako-tason aluerajat
+  // (mapData.aluejako — eri numeroitujen alueiden väliset rajaviivat,
+  // esim. A5/A6-alueiden raja). HUOM: 'PVcase PV Area' (koko
+  // paneelikentän oma, usein mutkikas ULKOREUNA) EI ole mukana tässä —
+  // se voi ylittää rivin ilman että kyseessä on oikeasti eri alue (ks.
+  // keskustelu: pieni tien ylitys + kentän oma reunaviiva katkaisi rivin
+  // 33:n virheellisesti Logistiikka/A6-alueella vaikka rivi jatkuu
+  // samana). Ilman Aluejako-erottelua kaksi vierekkäistä mutta
+  // itsenäisesti numeroitua aluetta (esim. rivit 61/63/65 alueella A5 ja
+  // 70/72/74 alueella A6) saattoivat ketjuuntua samaksi riviksi, koska
+  // niiden välissä oleva aluerajaviiva ei ollut "tie" eikä siis
+  // pysäyttänyt ketjua.
   //
   // HUOM: tämä on YLEINEN jana-jana-leikkaustesti, ei enää oleteta että
   // kysytty jana on vaakasuora kiinteällä rivin Y-korkeudella (yA/yB
@@ -185,10 +189,10 @@ export function findPinRow(mapData, pin) {
   // suoraan täsmälleen rivin oman vaakatason — pelkkä "ylittääkö tie
   // juuri tämän Y-tason" -testi ei nähnyt niitä, vaikka tie kulki
   // selvästi rivin ja kaukaisen numerolapun välissä.
-  const boundaryPolylines = [...mapData.roads, ...mapData.pvAreas]
+  const boundaryPolylines = [...mapData.roads, ...(mapData.aluejako || [])]
   const cross2 = (ax, ay, bx, by) => ax * by - ay * bx
-  const crossesBoundary = (xA, xB, yA = rowY, yB = rowY) => {
-    return boundaryPolylines.some(pts => {
+  const crossesLines = (polylines, xA, xB, yA = rowY, yB = rowY) => {
+    return polylines.some(pts => {
       for (let i = 0; i < pts.length - 1; i++) {
         const [x1, y1] = pts[i], [x2, y2] = pts[i + 1]
         const d1 = cross2(x2 - x1, y2 - y1, xA - x1, yA - y1)
@@ -201,6 +205,35 @@ export function findPinRow(mapData, pin) {
       return false
     })
   }
+  const crossesBoundary = (xA, xB, yA = rowY, yB = rowY) => crossesLines(boundaryPolylines, xA, xB, yA, yB)
+
+  // Lähin rivinumerolappu annetusta X-kohdasta samalta Y-kaistalta —
+  // käytetään alla tien-ylityksen sallimisen tarkistukseen.
+  const labelYTolEarly = Math.max(th * 0.6, localPitch * 0.45)
+  const nearestRowLabel = (x) => {
+    let best = Infinity, label = null
+    mapData.rowNumbers.forEach(t => {
+      if (Math.abs(t.y - rowY) > labelYTolEarly) return
+      const d = Math.abs(t.x - x)
+      if (d < best) { best = d; label = t.text }
+    })
+    return label
+  }
+
+  // Voiko ketju jatkua tämän aukon yli? Aluejako-rajat (eri numeroidut
+  // alueet, esim. Logistiikka/A6) katkaisevat AINA — ne todella erottavat
+  // itsenäisesti numeroituja rivejä. Pelkkä tie sen sijaan katkaisee vain
+  // jos aukon MOLEMMIN puolin ei löydy samaa rivinumeroa — todettu
+  // työmaalla (ks. keskustelu) että pieni tien/kulkuväylän ylitys kesken
+  // rivin ei aina tarkoita eri riviä, rivi jatkuu samalla numerolla toisella
+  // puolella. Jos numeroa ei löydy jommaltakummalta puolelta, ollaan
+  // varovaisia ja katkaistaan (turvallinen oletus).
+  const canBridgeGap = (xA, xB) => {
+    if (crossesLines(mapData.aluejako || [], xA, xB)) return false
+    if (!crossesLines(mapData.roads, xA, xB)) return true
+    const labelA = nearestRowLabel(xA), labelB = nearestRowLabel(xB)
+    return !!(labelA && labelB && labelA === labelB)
+  }
 
   const sameY = mapData.inserts
     .map((ins, idx) => ({ idx, ins, left: ins.x, right: ins.x + ins.panels * PANEL_W_M * sxm }))
@@ -209,28 +242,19 @@ export function findPinRow(mapData, pin) {
 
   const hitPos = sameY.findIndex(e => e.idx === hitIdx)
 
-  // HUOM: kokeiltiin aiemmin erillistä "ohita tie numeron haussa" -ketjua,
-  // mutta se osoittautui vääräksi — tiet OIKEASTI rajoittavat rivejä
-  // useilla alueilla (havaittu suoraan kartalta: pinni tien toisella
-  // puolella löysi väärän, kaukaisen rivin numeron kun tie-tarkistus
-  // ohitettiin). Käytetään siis yhtä ja samaa tie-/aluerajan huomioivaa
-  // ketjua sekä korostukseen että numeron hakuun — jos jollain TOISELLA
-  // työmaalla rivi oikeasti jatkuu saman numeroisena tien yli, se pitää
-  // ratkaista erikseen (esim. tarkistamalla onko molemmin puolin sama
-  // numero), ei sivuuttamalla tie-tarkistus kokonaan kaikkialla.
   const chain = [sameY[hitPos]]
   for (let i = hitPos - 1; i >= 0; i--) {
     const edge = chain[0].left
     const gap = edge - sameY[i].right
     // gap < -1: lohkot ovat selvästi päällekkäin (esim. DXF:n duplikoitu/
     // limittyvä data) — ei ketjuteta tällaisen läpi.
-    if (gap >= -1 && gap <= gapTol && !crossesBoundary(sameY[i].right, edge)) chain.unshift(sameY[i])
+    if (gap >= -1 && gap <= gapTol && canBridgeGap(sameY[i].right, edge)) chain.unshift(sameY[i])
     else break
   }
   for (let i = hitPos + 1; i < sameY.length; i++) {
     const edge = chain[chain.length - 1].right
     const gap = sameY[i].left - edge
-    if (gap >= -1 && gap <= gapTol && !crossesBoundary(edge, sameY[i].left)) chain.push(sameY[i])
+    if (gap >= -1 && gap <= gapTol && canBridgeGap(edge, sameY[i].left)) chain.push(sameY[i])
     else break
   }
 
@@ -275,25 +299,7 @@ export function findPinRow(mapData, pin) {
     })
     if (label2 && best2 <= maxLabelDist * 1.5) { best = best2; label = label2 }
   }
-  // Viimeinen varajärjestelmä: jos ketjuun perustuva kohdepiste (targetX)
-  // ei löydä mitään edes löysemmällä haulla — esim. koska ketjutus
-  // katkesi kesken Aluejako-rajaviivan kohdalla ja targetX jäi siksi
-  // väärään, "katkaistuun" kohtaan kauas oikeasta numerolapusta —
-  // kokeillaan vielä hakea lähin numero suoraan NAPATUN PÖYDÄN OMAN
-  // sijainnin (hit.x) perusteella sen sijaan että luovutettaisiin
-  // kokonaan. Parempi näyttää lähin uskottava numero (mahdollisesti
-  // hieman epätarkka) kuin jättää käyttäjä täysin tyhjän päälle.
-  if (!label || best > maxLabelDist * 1.5) {
-    const hitCenterY = hit.y + th / 2
-    let best3 = Infinity, label3 = null
-    mapData.rowNumbers.forEach(t => {
-      if (Math.abs(t.y - hitCenterY) > labelYTol * 1.5) return
-      const d = Math.hypot(t.x - hit.x, t.y - hitCenterY)
-      if (d < best3) { best3 = d; label3 = t.text }
-    })
-    if (label3 && best3 <= maxLabelDist * 2) { best = best3; label = label3 }
-  }
-  if (!label || best > maxLabelDist * 2) return null
+  if (!label || best > maxLabelDist * 1.5) return null
 
   // Palautetaan myös koko rivin (ketjun) lohkojen indeksit — näitä tarvitaan
   // kun halutaan korostaa/rajata koko rivi eikä vain sitä yhtä lohkoa johon

@@ -26,6 +26,14 @@ export function parseDXF(text) {
 
   // Parse entities
   const pvAreas = []
+  // Aluejako-tason rajat KAHDESTI tallennettuna: kerran pvAreas-joukkoon
+  // (piirtoa varten, ennallaan) ja erikseen tähän omaan taulukkoon —
+  // findPinRow (shared.js) tarvitsee juuri Aluejako-rajat erillään
+  // 'PVcase PV Area' -kentän ULKOREUNASTA, koska jälkimmäinen on koko
+  // paneelikentän oma (usein mutkikas/koverakin) ääriviiva, joka voi
+  // ylittää rivin ilman että kyseessä on oikeasti kaksi eri riviä/aluetta
+  // — vain Aluejako-raja tarkoittaa aidosti eri nimettyä aluetta.
+  const aluejako = []
   const roads = []
   const boundaries = []
   const inserts = [] // panel tables (drawn as INSERT blocks)
@@ -81,7 +89,7 @@ export function parseDXF(text) {
         }
         if (pts.length > 2) {
           if (layer === 'PVcase PV Area') pvAreas.push(pts)
-          else if (layer === 'Aluejako') pvAreas.push(pts)
+          else if (layer === 'Aluejako') { pvAreas.push(pts); aluejako.push(pts) }
           else if (layer === 'Road' || layer === 'PVcase Road') roads.push(pts)
           else if (layer === 'Aitaus') boundaries.push(pts)
           else if (layer === '665 Wp' || layer === '670 Wp' || layer === 'Extra panels') panelAreas.push(pts)
@@ -144,7 +152,7 @@ export function parseDXF(text) {
     i++
   }
 
-  return { W, H, pvAreas, roads, boundaries, inserts, panelAreas, rowNumbers, minX, minY, maxX, maxY }
+  return { W, H, pvAreas, aluejako, roads, boundaries, inserts, panelAreas, rowNumbers, minX, minY, maxX, maxY }
 }
 
 // ---------------------------------------------------------------------------
