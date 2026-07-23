@@ -419,7 +419,6 @@ export default function PaalutusView() {
   }
 
   async function savePile(pileId) {
-    if (!formType && !formExtra) { alert('Valitse paalukoko tai lisätoimenpide (esim. ankkurointi)') ; return }
     if (formType === '__muu__' && !formCustomType.trim()) { alert('Kirjoita paalukoko tekstikenttään'); return }
     const finalType = formType === '__muu__' ? formCustomType.trim() : formType
     setSaving(true)
@@ -501,9 +500,18 @@ export default function PaalutusView() {
     const allDone = rowPiles && rowPiles.length > 0 && doneCount === rowPiles.length
     return (
       <div style={{ maxWidth: 480, margin: '0 auto', padding: 16, fontFamily: 'sans-serif', paddingBottom: 80 }}>
-        <button onClick={closeRow} style={{ marginBottom: 12, padding: '8px 12px', border: '1px solid #ccc', borderRadius: 6, background: '#fff' }}>
-          ← Takaisin riveihin
-        </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8 }}>
+          <button onClick={closeRow} style={{ padding: '8px 12px', border: '1px solid #ccc', borderRadius: 6, background: '#fff' }}>
+            ← Takaisin riveihin
+          </button>
+          <button
+            onClick={() => setRowPiles(prev => prev ? [...prev].reverse() : prev)}
+            title="Vaihda mistä päästä numerointi alkaa"
+            style={{ padding: '8px 12px', border: '1px solid #ccc', borderRadius: 6, background: '#fff' }}
+          >
+            ↔ Käännä suunta
+          </button>
+        </div>
         <h2>{selectedArea} — rivi {selectedRow}</h2>
         {rowPiles == null ? <p>Ladataan...</p> : (
           <>
