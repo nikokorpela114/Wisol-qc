@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { sb } from './supabaseClient.js'
 import { KNOWN_SITES } from './shared.js'
-import { typeLabel, extraLabel, PILE_TYPES, EXTRA_ACTIONS, buildRowExportFiles } from './PaalutusView.jsx'
+import { typeLabel, extraLabel, PILE_TYPES, EXTRA_ACTIONS, buildRowExportFiles, orderPilesAlongRow } from './PaalutusView.jsx'
 
 const sevColor = { Kriittinen: '#b02828', Huomio: '#a06800', Info: '#1a7a45' }
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
@@ -247,7 +247,9 @@ export default function Dashboard() {
     setEditPileId(null)
     const site = pileSiteFilter || KNOWN_SITES[0]?.key
     const { data, error } = await sb.from('piles').select('*').eq('site', site).eq('area', area).eq('row_number', rowNumber).order('id')
-    setExpandedRowPiles(error ? [] : (data || []))
+    // Sama fyysinen pääsuunta-lajittelu kuin paaluttajan näkymässä (PaalutusView),
+    // jotta valvomon numerointi ja vienti täsmäävät paaluttajan omaan näkymään.
+    setExpandedRowPiles(error ? [] : orderPilesAlongRow(data || []))
   }
 
   // Tyhjentää KOKO avoinna olevan rivin — kaikki sen paalut palautuvat
@@ -261,7 +263,7 @@ export default function Dashboard() {
     }).eq('site', site).eq('area', area).eq('row_number', rowNumber)
     if (error) { alert('Tyhjennys epäonnistui: ' + error.message); return }
     const { data: refreshed } = await sb.from('piles').select('*').eq('site', site).eq('area', area).eq('row_number', rowNumber).order('id')
-    setExpandedRowPiles(refreshed || [])
+    setExpandedRowPiles(orderPilesAlongRow(refreshed || []))
     load()
   }
 

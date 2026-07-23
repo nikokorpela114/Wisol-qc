@@ -9,6 +9,37 @@ import { KNOWN_SITES } from './shared.js'
 
 const SESSION_KEY = 'wisol_pile_operator_session'
 
+// Järjestää rivin paalut niiden todellisen pääsuunnan mukaan (PCA/
+// regressiosuora), ei kiinteän x- tai y-akselin mukaan. Pelkkä x- tai
+// y-akseli toimii vain jos rivi on lähes suoraan itä-länsi tai pohjois-etelä
+// — vinolle tai kaartuvalle riville se sekoittaa järjestyksen, koska pisteet
+// voivat edetä molemmilla akseleilla samaan aikaan. PCA:lla laskettu
+// pääsuunta seuraa rivin todellista kulkua kaikissa kulmissa, ja täysin
+// suoralle länsi-itä/pohjois-etelä-riville tulos on identtinen vanhaan
+// akselipohjaiseen lajitteluun verrattuna.
+export function orderPilesAlongRow(data) {
+  if (data.length < 2) return [...data]
+  const n = data.length
+  const mx = data.reduce((s, p) => s + p.x, 0) / n
+  const my = data.reduce((s, p) => s + p.y, 0) / n
+  let sxx = 0, syy = 0, sxy = 0
+  data.forEach(p => {
+    const dx = p.x - mx, dy = p.y - my
+    sxx += dx * dx; syy += dy * dy; sxy += dx * dy
+  })
+  const angle = 0.5 * Math.atan2(2 * sxy, sxx - syy)
+  let dirX = Math.cos(angle), dirY = Math.sin(angle)
+  // Suunta pidetään samana kuin aiemmassa logiikassa: pääosin itä-länsi
+  // riveillä edetään lännestä itään, pääosin pohjois-etelä riveillä
+  // pohjoisesta etelään.
+  if (sxx >= syy) {
+    if (dirX < 0) { dirX = -dirX; dirY = -dirY }
+  } else if (dirY > 0) {
+    dirX = -dirX; dirY = -dirY
+  }
+  return [...data].sort((a, b) => (a.x * dirX + a.y * dirY) - (b.x * dirX + b.y * dirY))
+}
+
 export const PILE_TYPES = [
   { code: 'A', label: 'A — 2500×100' },
   { code: 'B', label: 'B — 2500×150' },
@@ -389,12 +420,11 @@ export default function PaalutusView() {
         // HUOM: tietokannan järjestys on DXF:n piirtojärjestys, EI fyysinen
         // sijainti — ilman tätä "Paalu #3" ja "Paalu #67" voisivat olla
         // vierekkäin kartalla, mikä on hämmentävää. Järjestetään rivin
-        // pidemmän suunnan mukaan (yleensä länsi-itä, joskus pohjois-etelä).
-        const xs = data.map(p => p.x), ys = data.map(p => p.y)
-        const spanX = Math.max(...xs) - Math.min(...xs)
-        const spanY = Math.max(...ys) - Math.min(...ys)
-        const sorted = [...data].sort((a, b) => spanX >= spanY ? (a.x - b.x) : (b.y - a.y))
-        setRowPiles(sorted)
+        // todellisen pääsuunnan (PCA/regressiosuora) mukaan, EI pelkän x- tai
+        // y-akselin mukaan — pelkkä akselivalinta rikkoo järjestyksen vinoilla
+        // tai kaartuvilla riveillä (piste voi "hypätä" edestakaisin), kun taas
+        // pääsuunta toimii oikein sekä suorille että vinoille riveille.
+        setRowPiles(orderPilesAlongRow(data))
       })
   }
 
