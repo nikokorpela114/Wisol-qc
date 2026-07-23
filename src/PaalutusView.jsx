@@ -229,15 +229,40 @@ export async function buildRowExportFiles(rowPiles, areaLabel, rowNumber, siteLa
   const mOffY = y + mPad + (mapH - mPad * 2 - mDrawH) / 2
   const mtx = px => mOffX + (px - mMinX) * mScale
   const mty = py => mOffY + (mDrawH - (py - mMinY) * mScale) // pohjoinen ylös
+  // Pohjoisnuoli piirretään viivoilla, ei unicode-nuolimerkillä — jsPDF:n
+  // oletusfontti ei tue "↑"-merkkiä ja se piirtyi aiemmin roskamerkkeinä.
   doc.setFontSize(7); doc.setTextColor(120, 120, 120)
-  doc.text('N ↑', mapX + mapW - 3, y + 5, { align: 'right' })
-  rowPiles.forEach((p, idx) => {
-    const cx = mtx(p.x), cy = mty(p.y)
+  const nx = mapX + mapW - 10, ny = y + 7
+  doc.text('N', nx, ny, { align: 'center' })
+  doc.setDrawColor(120, 120, 120); doc.setLineWidth(0.3)
+  doc.line(nx, ny - 2.2, nx, ny - 6)
+  doc.line(nx, ny - 6, nx - 1, ny - 4.3)
+  doc.line(nx, ny - 6, nx + 1, ny - 4.3)
+  doc.setLineWidth(0.2)
+
+  // Esilasketaan pisteiden sijainnit ja tunnistetaan pystysuunnassa
+  // päällekkäiset parit (esim. paalu + tukipaalu samassa kohdassa), jotta
+  // numero piirretään ylemmälle pisteelle yläpuolelle ja alemmalle
+  // alapuolelle — muuten alemman numero peittyi ylemmän pisteen alle.
+  const pts = rowPiles.map(p => ({ p, cx: mtx(p.x), cy: mty(p.y) }))
+  const xBucket = new Map()
+  pts.forEach(pt => {
+    const key = Math.round(pt.cx / 1.2)
+    if (!xBucket.has(key)) xBucket.set(key, [])
+    xBucket.get(key).push(pt)
+  })
+  pts.forEach(pt => {
+    const key = Math.round(pt.cx / 1.2)
+    const group = xBucket.get(key)
+    pt.labelAbove = group.length <= 1 || group.slice().sort((a, b) => a.cy - b.cy)[0] === pt
+  })
+  pts.forEach((pt, idx) => {
+    const { p, cx, cy } = pt
     if (p.status === 'done') doc.setFillColor(26, 122, 69); else doc.setFillColor(153, 153, 153)
     doc.circle(cx, cy, 0.7, 'F')
     if (p.pull_test_kn != null) { doc.setDrawColor(214, 48, 48); doc.setLineWidth(0.25); doc.circle(cx, cy, 1.2, 'S') }
     doc.setFontSize(3.2); doc.setTextColor(70, 70, 70)
-    doc.text(String(idx + 1), cx, cy - 1.6, { align: 'center' })
+    doc.text(String(idx + 1), cx, pt.labelAbove ? cy - 1.6 : cy + 2.8, { align: 'center' })
   })
   doc.setLineWidth(0.2)
   y += mapH + 8
