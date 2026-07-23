@@ -100,6 +100,11 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation, gpsAccuracy }) {
       xs.push(myLocation.x); ys.push(myLocation.y)
     }
   }
+  const nearestPile = (hasPiles && myLocation) ? piles.reduce((best, p) => {
+    const d = Math.hypot(p.x - myLocation.x, p.y - myLocation.y)
+    return (!best || d < best.d) ? { p, d } : best
+  }, null) : null
+
   const minX = Math.min(...xs), maxX = Math.max(...xs)
   const minY = Math.min(...ys), maxY = Math.max(...ys)
   const spanX = Math.max(maxX - minX, 1)
@@ -190,6 +195,7 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation, gpsAccuracy }) {
           }}
         >
           GPS ±{Math.round(gpsAccuracy)} m{gpsAccuracy > MAX_GPS_ACCURACY_M ? ' — liian epätarkka' : ''}
+          {nearestPile ? ` · lähin paalu ${nearestPile.d.toFixed(0)} m` : ''}
         </div>
       )}
       {showLocation && (
