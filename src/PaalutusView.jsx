@@ -164,8 +164,12 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
           )}
           {showLocation && (
             <g>
-              <circle cx={tx(myLocation.x)} cy={ty(myLocation.y)} r={9} fill="#1a2fcc" fillOpacity={0.2} />
-              <circle cx={tx(myLocation.x)} cy={ty(myLocation.y)} r={4} fill="#1a2fcc" stroke="#fff" strokeWidth={1.5} />
+              {/* Punainen poikkiviiva koko kartan korkeudelta oman sijainnin
+                  x-kohdalla — näkyy selvästi kumpaa kautta tahansa (pohjois-
+                  tai eteläpuolelta) riviä lähestytään, ja osoittaa suoraan
+                  minkä paaluparin kohdalla kone on. */}
+              <line x1={tx(myLocation.x)} y1={0} x2={tx(myLocation.x)} y2={boxH} stroke="#e03131" strokeWidth={2.5} strokeDasharray="5 4" />
+              <circle cx={tx(myLocation.x)} cy={ty(myLocation.y)} r={4} fill="#e03131" stroke="#fff" strokeWidth={1.5} />
             </g>
           )}
         </svg>
