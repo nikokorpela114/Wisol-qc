@@ -214,7 +214,7 @@ export async function buildRowExportFiles(rowPiles, areaLabel, rowNumber, siteLa
   // sovitetaan laatikkoon (ei vieritystä paperilla), säilyttää oikean
   // kuvasuhteen. Punainen rengas = vetotesti tehty.
   let y = isPartial ? 33 : 30
-  const mapX = 14, mapW = 182, mapH = 55
+  const mapX = 14, mapW = 182, mapH = 62
   doc.setDrawColor(200, 205, 220)
   doc.setFillColor(238, 244, 236)
   doc.rect(mapX, y, mapW, mapH, 'FD')
@@ -231,11 +231,13 @@ export async function buildRowExportFiles(rowPiles, areaLabel, rowNumber, siteLa
   const mty = py => mOffY + (mDrawH - (py - mMinY) * mScale) // pohjoinen ylös
   doc.setFontSize(7); doc.setTextColor(120, 120, 120)
   doc.text('N ↑', mapX + mapW - 3, y + 5, { align: 'right' })
-  rowPiles.forEach(p => {
+  rowPiles.forEach((p, idx) => {
     const cx = mtx(p.x), cy = mty(p.y)
     if (p.status === 'done') doc.setFillColor(26, 122, 69); else doc.setFillColor(153, 153, 153)
     doc.circle(cx, cy, 0.7, 'F')
     if (p.pull_test_kn != null) { doc.setDrawColor(214, 48, 48); doc.setLineWidth(0.25); doc.circle(cx, cy, 1.2, 'S') }
+    doc.setFontSize(3.2); doc.setTextColor(70, 70, 70)
+    doc.text(String(idx + 1), cx, cy - 1.6, { align: 'center' })
   })
   doc.setLineWidth(0.2)
   y += mapH + 8
