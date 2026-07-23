@@ -8,6 +8,10 @@ import { latLngToTM35FIN } from './coords.js'
 import { KNOWN_SITES } from './shared.js'
 
 const SESSION_KEY = 'wisol_pile_operator_session'
+// Huonompia GPS-lukemia kuin tämä (metrejä) ei käytetä sijainnin
+// päivittämiseen — ensimmäiset watchPosition-lukemat ja paneelien alla
+// otetut lukemat voivat olla kymmeniä-satoja metrejä pielessä.
+const MAX_GPS_ACCURACY_M = 20
 
 // Järjestää rivin paalut niiden todellisen pääsuunnan mukaan (PCA/
 // regressiosuora), ei kiinteän x- tai y-akselin mukaan. Pelkkä x- tai
@@ -75,7 +79,7 @@ export function typeLabel(code) {
 // Y kasvaa pohjoiseen), säilyttää oikean kuvasuhteen (rivi on yleensä pitkä
 // ja kapea). Paalu numeroitu samalla numerolla kuin listassa alla, väritetty
 // tilan mukaan, ja tapista voi avata saman muokkauksen kuin listasta.
-function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
+function RowMiniMap({ piles, editingId, onSelect, myLocation, gpsAccuracy }) {
   const scrollRef = useRef(null)
   const [followMe, setFollowMe] = useState(true) // oletuksena päällä — vierittää automaattisesti omaan sijaintiin
 
@@ -174,6 +178,20 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation }) {
           )}
         </svg>
       </div>
+      {gpsAccuracy != null && (
+        <div
+          title="GPS-sijainnin tarkkuus juuri nyt"
+          style={{
+            position: 'absolute', bottom: 8, left: 8, zIndex: 10,
+            fontSize: 11, padding: '3px 8px', borderRadius: 6,
+            background: gpsAccuracy > MAX_GPS_ACCURACY_M ? 'rgba(214,48,48,0.12)' : 'rgba(26,122,69,0.12)',
+            color: gpsAccuracy > MAX_GPS_ACCURACY_M ? '#b42318' : '#1a7a45',
+            border: `1px solid ${gpsAccuracy > MAX_GPS_ACCURACY_M ? '#e8a3a3' : '#a8d5bb'}`,
+          }}
+        >
+          GPS ±{Math.round(gpsAccuracy)} m{gpsAccuracy > MAX_GPS_ACCURACY_M ? ' — liian epätarkka' : ''}
+        </div>
+      )}
       {showLocation && (
         <button
           onClick={() => setFollowMe(f => !f)}
@@ -346,12 +364,20 @@ export default function PaalutusView() {
   const [exportMsg, setExportMsg] = useState('')
   const [myLocation, setMyLocation] = useState(null)
 
-  // GPS-seuranta vain kun rivinäkymä on auki (säästää akkua muualla)
+  // GPS-seuranta vain kun rivinäkymä on auki (säästää akkua muualla).
+  // HUOM: ensimmäiset watchPosition-lukemat voivat olla hyvin epätarkkoja
+  // (kymmeniä-satoja metrejä pielessä) ennen kuin GPS-lukitus tarkentuu, ja
+  // paneelien alla seisominen (metallikehykset yläpuolella) heikentää
+  // tarkkuutta entisestään. Hylätään lukemat joiden accuracy on huono, jottei
+  // kartalla näytetä harhaanjohtavan tarkkaa mutta väärää sijaintia.
+  const [gpsAccuracy, setGpsAccuracy] = useState(null)
   useEffect(() => {
     if (selectedRow == null || !navigator.geolocation) return
     const watcher = navigator.geolocation.watchPosition(pos => {
+      setGpsAccuracy(pos.coords.accuracy)
+      if (pos.coords.accuracy > MAX_GPS_ACCURACY_M) return
       const { x, y } = latLngToTM35FIN(pos.coords.latitude, pos.coords.longitude)
-      setMyLocation({ x, y })
+      setMyLocation({ x, y, accuracy: pos.coords.accuracy })
     }, () => {}, { enableHighAccuracy: true })
     return () => navigator.geolocation.clearWatch(watcher)
   }, [selectedRow])
@@ -577,7 +603,7 @@ export default function PaalutusView() {
         {rowPiles == null ? <p>Ladataan...</p> : (
           <>
             <div style={{ position: 'sticky', top: 0, zIndex: 5, background: '#f7f8fb', paddingTop: 4, paddingBottom: 4 }}>
-              <RowMiniMap piles={rowPiles} editingId={editingId} onSelect={p => editingId === p.id ? setEditingId(null) : startEdit(p)} myLocation={myLocation} />
+              <RowMiniMap piles={rowPiles} editingId={editingId} onSelect={p => editingId === p.id ? setEditingId(null) : startEdit(p)} myLocation={myLocation} gpsAccuracy={gpsAccuracy} />
               <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>🔴 punainen rinkula = vetotesti tehty</div>
             </div>
             <p style={{ color: '#666' }}>{doneCount} / {rowPiles.length} paalua merkitty</p>
